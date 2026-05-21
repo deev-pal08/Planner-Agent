@@ -20,7 +20,7 @@ class EmailReceiver:
     def __init__(self, config: IMAPConfig):
         self.config = config
 
-    def fetch_replies(self, since_date: str | None = None) -> list[dict]:
+    def fetch_replies(self, since_date: str | None = None, from_address: str = "") -> list[dict]:
         """
         Connect to IMAP, find replies to planner briefing emails.
 
@@ -67,6 +67,18 @@ class EmailReceiver:
                 subject = _decode_subject(msg.get("Subject", ""))
 
                 if not SUBJECT_PATTERN.search(subject):
+                    continue
+
+                # Skip outbound briefings — only process actual replies
+                sender = msg.get("From", "")
+                if from_address and from_address.lower() in sender.lower():
+                    continue
+
+                is_reply = (
+                    subject.lower().startswith("re:")
+                    or msg.get("In-Reply-To")
+                )
+                if not is_reply:
                     continue
 
                 body = _extract_body(msg)

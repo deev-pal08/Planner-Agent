@@ -112,6 +112,24 @@ class FeedbackEntry(BaseModel):
     learnings: str = ""
 
 
+class NewsletterArticle(BaseModel):
+    """A single newsletter article for the reading block."""
+
+    title: str
+    url: str
+    priority: str
+    why: str = ""
+
+
+class NewsletterReading(BaseModel):
+    """The newsletter reading block — one combined task."""
+
+    title: str
+    description: str
+    estimated_hours: float
+    articles: list[NewsletterArticle] = Field(default_factory=list)
+
+
 class DailyBriefing(BaseModel):
     """Structured output from the Claude agent — the daily plan."""
 
@@ -124,6 +142,7 @@ class DailyBriefing(BaseModel):
     portfolio_gaps: list[str] = Field(default_factory=list)
     skill_observations: list[str] = Field(default_factory=list)
     newsletter_topics: list[str] = Field(default_factory=list)
+    newsletter_reading: NewsletterReading | None = None
 
 
 class EmailFeedback(BaseModel):

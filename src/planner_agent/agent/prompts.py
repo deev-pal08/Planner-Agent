@@ -19,13 +19,18 @@ Your job is to generate tomorrow's task list based on their current state, goals
 
 ## THE LEARNING LOOP (HARD CONSTRAINT — never skip phases)
 Every skill follows this progression:
-1. LEARN: Study 200+ reports/articles until the topic is internalized
+1. LEARN: Study reports, articles, papers, videos until the topic is internalized
 2. PRACTICE: CTFs, labs, bug bounty, code reviews, build-then-break
 3. PRODUCE: CVEs, Hall of Fames, articles, papers, patents, tools, talks
 
 You MUST track which phase each skill is in. \
-Never assign practice tasks before learning threshold is met. \
-Never assign production tasks before practice threshold is met.
+Phase transitions are YOUR judgment call based on the user's demonstrated understanding, \
+completion patterns, and confidence signals — not a fixed item count. \
+Some skills may need 50 resources before practice, others may need 300. \
+Assess readiness based on: breadth of coverage across sub-topics, \
+quality of learnings noted, and whether the user can articulate concepts in their own words. \
+Never assign practice tasks before the user has sufficient foundational knowledge. \
+Never assign production tasks before practice proficiency is demonstrated.
 
 ## TASK SPECIFICITY (NON-NEGOTIABLE)
 Every task you generate MUST be specific enough to start immediately. \
@@ -71,18 +76,86 @@ Return a JSON object with this exact structure:
       "why": "Why THIS specific resource, how it connects to what was done before"
     }
   ],
+  "newsletter_reading": {
+    "title": "Newsletter Reading: <theme>",
+    "description": "Overview of what these articles cover",
+    "estimated_hours": 1.0,
+    "articles": [
+      {
+        "title": "Article title",
+        "url": "https://...",
+        "priority": "CRITICAL|IMPORTANT|INTERESTING|REFERENCE",
+        "why": "One sentence on relevance"
+      }
+    ]
+  },
   "total_estimated_hours": 4.0,
   "portfolio_gaps": ["0 research papers — Global Talent Visa risk", ...],
   "skill_observations": ["Prompt injection learning phase: 15/200 articles read", ...],
   "newsletter_topics": ["prompt injection", "SSRF in cloud environments"]
 }
 
+IMPORTANT: "tasks" must contain ONLY your own generated tasks (labs, papers, CTFs, courses, \
+research, etc.). Newsletter articles go ONLY in "newsletter_reading". \
+"total_estimated_hours" must include both tasks AND newsletter_reading hours.
+
 ## CONSTRAINTS
 - total_estimated_hours MUST NOT exceed the available hours for the day
 - Tasks MUST sum to the available hours (no slack, no overrun)
 - Include 1 portfolio gap alert if any track has 0 achievements
 - If the user has been skipping a task type repeatedly, note it in skill_observations
-- newsletter_topics: suggest 1-2 topics for the Newsletter Agent to scan
+- newsletter_topics: ONLY populate when the newsletter DB genuinely lacks coverage \
+for a needed topic. Include exact search terms the user should run. \
+Format: "Run newsletter agent with: '<search terms>'"
+
+## NEWSLETTER ARTICLE INTEGRATION
+
+You may receive UNREAD NEWSLETTER ARTICLES in the context — these are real, curated articles \
+from the user's security newsletter agent, already ranked by priority.
+
+### CRITICAL RULE: Newsletter articles are NOT regular tasks.
+Newsletter articles MUST NOT be mixed into the main task list. Instead:
+1. Generate your own tasks first (labs, papers, CTFs, courses, research, etc.) from your \
+   own knowledge. These are the numbered tasks in the "tasks" array.
+2. Then, separately, populate the "newsletter_reading" field in the JSON output with ALL \
+   relevant unread newsletter articles the user should read today. This is treated as a \
+   single reading block — one task, not many.
+
+### Newsletter reading field format:
+"newsletter_reading": {
+  "title": "Newsletter Reading: <theme or summary>",
+  "description": "Brief overview of what these articles cover and why they matter today",
+  "estimated_hours": 1.0,
+  "articles": [
+    {
+      "title": "Article title",
+      "url": "https://...",
+      "priority": "CRITICAL|IMPORTANT|INTERESTING|REFERENCE",
+      "why": "One sentence: why this article matters for the user's current phase"
+    }
+  ]
+}
+
+### Selection rules for newsletter_reading:
+- Include ALL CRITICAL articles — they are always relevant.
+- Include IMPORTANT articles that align with the day's focus track or active learning.
+- Include INTERESTING articles only if they are directly relevant to current work.
+- Skip REFERENCE articles unless they fill a specific knowledge gap.
+- Estimate ~10-15 min per short article, 30-45 min for long/dense ones.
+- If no newsletter articles are relevant or available, omit "newsletter_reading" entirely.
+
+### Newsletter run recommendations:
+- ONLY recommend running the newsletter agent when ALL of these are true:
+  a) You need articles on a specific topic for the user's current learning phase
+  b) The UNREAD NEWSLETTER ARTICLES section has few or no articles on that topic
+  c) The newsletter DB is not already stale (if stale, recommend a general refresh first)
+- If the newsletter DB has plenty of unread content, DO NOT suggest running it — \
+  each run costs $5-6.
+- If the newsletter DB is unavailable or empty, use your own knowledge to recommend \
+  specific resources — do NOT block briefing generation.
+- Newsletter articles SUPPLEMENT your own resource suggestions, they do not replace them. \
+  You should STILL suggest labs, CTFs, courses, papers, and other resources from your \
+  own knowledge as the main tasks.
 """
 
 FEEDBACK_PARSE_PROMPT = """\
@@ -129,6 +202,8 @@ def build_briefing_context(
     available_hours: float,
     day_of_week: str,
     today: str,
+    newsletter_articles: dict[str, list[dict]] | None = None,
+    newsletter_meta: dict | None = None,
 ) -> str:
     """Build the user message with full state context for Claude."""
     sections = []
@@ -177,9 +252,10 @@ def build_briefing_context(
         lines = ["## RECENTLY COMPLETED TASKS"]
         for t in recent_tasks[:15]:
             learning_note = f" | Learned: {t['learnings']}" if t.get("learnings") else ""
+            url_note = f" | URL: {t['resource_url']}" if t.get("resource_url") else ""
             lines.append(
                 f"- [{t['track']}] {t['title']} "
-                f"({t.get('actual_hours') or t['estimated_hours']}h){learning_note}"
+                f"({t.get('actual_hours') or t['estimated_hours']}h){url_note}{learning_note}"
             )
         sections.append("\n".join(lines))
 
@@ -209,6 +285,44 @@ def build_briefing_context(
         for a in achievements[:20]:
             lines.append(f"- [{a['achievement_type']}] {a['title']}")
         sections.append("\n".join(lines))
+
+    # Newsletter articles
+    if newsletter_articles and newsletter_meta:
+        meta = newsletter_meta
+        age_str = f"{meta['db_age_days']:.0f}" if meta.get("db_age_days") is not None else "unknown"
+        header = (
+            f"## UNREAD NEWSLETTER ARTICLES\n"
+            f"Database age: {age_str} days | "
+            f"Total articles: {meta.get('total_articles', 0):,} | "
+            f"Unread shown: {meta.get('unread_shown', 0)} | "
+            f"Already consumed: {meta.get('consumed_count', 0)}"
+        )
+        if meta.get("is_stale"):
+            header += "\n⚠ DATABASE IS STALE — recommend user runs a newsletter refresh"
+
+        article_lines = [header]
+        for tier in ("CRITICAL", "IMPORTANT", "INTERESTING", "REFERENCE"):
+            articles = newsletter_articles.get(tier, [])
+            if not articles:
+                continue
+            article_lines.append(f"\n### {tier} ({len(articles)} articles)")
+            for a in articles:
+                tags_str = ", ".join(a.get("tags", []))
+                score_str = f" | Score: {a['score']}" if a.get("score") else ""
+                pub_str = ""
+                if a.get("published_at"):
+                    pub = str(a["published_at"])[:10]
+                    pub_str = f" | Published: {pub}"
+                article_lines.append(
+                    f"- \"{a['title']}\" | {a['url']} | "
+                    f"Source: {a.get('source_name', 'unknown')}{score_str}{pub_str}"
+                )
+                if tags_str:
+                    article_lines.append(f"  Tags: [{tags_str}]")
+                if a.get("ai_summary"):
+                    article_lines.append(f"  Summary: {a['ai_summary']}")
+
+        sections.append("\n".join(article_lines))
 
     sections.append(
         "## INSTRUCTION\n"

@@ -41,7 +41,7 @@ def cli(ctx: click.Context, config: str, verbose: bool) -> None:
 @click.option("--no-email", is_flag=True, help="Print briefing to terminal, don't send email")
 @click.pass_context
 def daily(ctx: click.Context, date: str | None, no_email: bool) -> None:
-    """Full daily cycle: process email replies, generate briefing, send email."""
+    """Full daily cycle: generate briefing, send email."""
     config = ctx.obj["config"]
 
     from planner_agent.agent.loop import PlannerAgent
@@ -50,20 +50,14 @@ def daily(ctx: click.Context, date: str | None, no_email: bool) -> None:
     state = StateStore(config.state_dir)
     agent = PlannerAgent(config, state)
 
-    # Step 1: Process any email replies from yesterday
-    if config.imap.enabled and not no_email:
-        replies_processed = _process_replies_impl(config, state, agent)
-        if replies_processed > 0:
-            click.echo(f"Processed {replies_processed} email replies.\n")
-
-    # Step 2: Generate today's briefing
+    # Step 1: Generate today's briefing
     click.echo("Generating daily briefing...")
     briefing = agent.generate_briefing(target_date=date)
 
-    # Step 3: Print briefing to terminal
+    # Step 2: Print briefing to terminal
     _print_briefing(briefing)
 
-    # Step 4: Send email
+    # Step 3: Send email
     if not no_email and config.email.enabled and config.email.to_addresses:
         try:
             from planner_agent.email.sender import EmailSender
@@ -402,29 +396,30 @@ def history(ctx: click.Context, days: int) -> None:
 # --- Internal helpers ---
 
 def _process_replies_impl(config, state, agent) -> int:  # type: ignore[no-untyped-def]
-    """Process email replies and update task statuses."""
+    """Process the most recent email reply and update task statuses."""
+    last_briefing = state.get_last_briefing()
+    if not last_briefing:
+        click.echo("No briefing found — generate one first with `planner daily`.")
+        return 0
+
     from planner_agent.email.receiver import EmailReceiver
 
     receiver = EmailReceiver(config.imap)
-    last_date = state.last_briefing_date
-    replies = receiver.fetch_replies(since_date=last_date)
+    replies = receiver.fetch_replies(
+        since_date=state.last_briefing_date,
+        from_address=config.email.from_address,
+    )
 
     if not replies:
         return 0
 
-    last_briefing = state.get_last_briefing()
-    if not last_briefing:
-        return 0
+    reply = replies[-1]
 
     briefing_tasks = json.loads(last_briefing.get("tasks_json", "[]"))
-    total_updated = 0
+    feedback = agent.parse_feedback(reply["body"], briefing_tasks)
+    updated = agent.apply_feedback(feedback, briefing_tasks)
 
-    for reply in replies:
-        feedback = agent.parse_feedback(reply["body"], briefing_tasks)
-        updated = agent.apply_feedback(feedback, briefing_tasks)
-        total_updated += updated
-
-    return total_updated
+    return updated
 
 
 def _print_briefing(briefing) -> None:  # type: ignore[no-untyped-def]
@@ -452,6 +447,29 @@ def _print_briefing(briefing) -> None:  # type: ignore[no-untyped-def]
         click.echo()
 
     click.echo(f"  Total: {briefing.total_estimated_hours}h planned\n")
+
+    # Newsletter reading block (always last, separate from tasks)
+    if briefing.newsletter_reading and briefing.newsletter_reading.articles:
+        nr = briefing.newsletter_reading
+        task_num = len(briefing.tasks) + 1
+        click.echo(click.style(
+            f"  {task_num}. [NEWSLETTER] {nr.title} ({nr.estimated_hours}h)",
+            fg="magenta", bold=True,
+        ))
+        click.echo(f"     {nr.description}")
+        for article in nr.articles:
+            priority_color = {
+                "CRITICAL": "red", "IMPORTANT": "yellow",
+                "INTERESTING": "blue", "REFERENCE": "white",
+            }.get(article.priority, "white")
+            click.echo(click.style(
+                f"     • [{article.priority}] {article.title}",
+                fg=priority_color,
+            ))
+            click.echo(click.style(f"       {article.url}", fg="bright_black"))
+            if article.why:
+                click.echo(click.style(f"       Why: {article.why}", fg="bright_black"))
+        click.echo()
 
     if briefing.portfolio_gaps:
         click.echo(click.style("  Portfolio Gaps:", fg="red", bold=True))

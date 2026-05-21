@@ -17,6 +17,8 @@ from planner_agent.config import AppConfig, load_about_me
 from planner_agent.models import (
     DailyBriefing,
     EmailFeedback,
+    NewsletterArticle,
+    NewsletterReading,
     Phase,
     Priority,
     Task,
@@ -58,6 +60,49 @@ class PlannerAgent:
         completion_stats = self.state.get_completion_stats(days=7)
         skipped_patterns = self.state.get_skipped_patterns(days=14)
 
+        # Newsletter integration (read-only, graceful degradation)
+        newsletter_articles = None
+        newsletter_meta = None
+
+        if self.config.newsletter.enabled and self.config.newsletter.project_dir:
+            try:
+                from planner_agent.state.newsletter import NewsletterReader
+
+                reader = NewsletterReader(self.config.newsletter.project_dir)
+                if reader.is_available():
+                    consumed_urls = self.state.get_consumed_article_urls()
+                    db_age = reader.get_db_age_days()
+                    total_count = reader.get_article_count()
+
+                    articles_by_priority = reader.get_articles_by_priority(
+                        exclude_urls=consumed_urls,
+                    )
+                    unread_total = sum(len(v) for v in articles_by_priority.values())
+
+                    newsletter_articles = articles_by_priority
+                    newsletter_meta = {
+                        "db_age_days": db_age,
+                        "total_articles": total_count,
+                        "unread_shown": unread_total,
+                        "consumed_count": len(consumed_urls),
+                        "is_stale": (
+                            db_age is not None
+                            and db_age > self.config.newsletter.stale_threshold_days
+                        ),
+                    }
+                    reader.close()
+                    logger.info(
+                        "Newsletter: %d total, %d unread shown, DB age: %.1f days",
+                        total_count, unread_total, db_age or 0,
+                    )
+                else:
+                    logger.warning(
+                        "Newsletter DB not available at %s",
+                        self.config.newsletter.project_dir,
+                    )
+            except Exception:
+                logger.exception("Failed to read newsletter DB — continuing without it")
+
         context = build_briefing_context(
             about_me=self.about_me,
             skills=skills,
@@ -69,6 +114,8 @@ class PlannerAgent:
             available_hours=available_hours,
             day_of_week=day_of_week,
             today=today,
+            newsletter_articles=newsletter_articles,
+            newsletter_meta=newsletter_meta,
         )
 
         logger.info("Generating briefing for %s (%s, %.1fh available)", today, day_of_week, available_hours)
@@ -100,6 +147,24 @@ class PlannerAgent:
                 assigned_date=datetime.fromisoformat(today),
             ))
 
+        newsletter_reading = None
+        nr_data = briefing_data.get("newsletter_reading")
+        if nr_data and isinstance(nr_data, dict) and nr_data.get("articles"):
+            newsletter_reading = NewsletterReading(
+                title=nr_data.get("title", "Newsletter Reading"),
+                description=nr_data.get("description", ""),
+                estimated_hours=nr_data.get("estimated_hours", 1.0),
+                articles=[
+                    NewsletterArticle(
+                        title=a.get("title", ""),
+                        url=a.get("url", ""),
+                        priority=a.get("priority", "INTERESTING"),
+                        why=a.get("why", ""),
+                    )
+                    for a in nr_data["articles"]
+                ],
+            )
+
         briefing = DailyBriefing(
             date=today,
             focus_track=briefing_data.get("focus_track", ""),
@@ -110,6 +175,7 @@ class PlannerAgent:
             portfolio_gaps=briefing_data.get("portfolio_gaps", []),
             skill_observations=briefing_data.get("skill_observations", []),
             newsletter_topics=briefing_data.get("newsletter_topics", []),
+            newsletter_reading=newsletter_reading,
         )
 
         self._persist_briefing(briefing)
@@ -147,9 +213,20 @@ class PlannerAgent:
 
         task_updates = []
         for u in feedback_data.get("task_updates", []):
+            raw_status = u.get("status", "done")
+            try:
+                status = TaskStatus(raw_status)
+            except ValueError:
+                status_map = {
+                    "not_mentioned": TaskStatus.PENDING,
+                    "not_started": TaskStatus.PENDING,
+                    "partial": TaskStatus.IN_PROGRESS,
+                }
+                status = status_map.get(raw_status, TaskStatus.PENDING)
+
             task_updates.append(FeedbackEntry(
                 task_id=u.get("task_id", 0),
-                status=TaskStatus(u.get("status", "done")),
+                status=status,
                 actual_hours=u.get("actual_hours"),
                 notes=u.get("notes", ""),
                 learnings=u.get("learnings", ""),
@@ -168,7 +245,7 @@ class PlannerAgent:
             idx = entry.task_id - 1
             if 0 <= idx < len(briefing_tasks):
                 task_row = briefing_tasks[idx]
-                db_id = task_row.get("id")
+                db_id = task_row.get("db_id") or task_row.get("id")
                 if db_id is None:
                     continue
 
@@ -202,14 +279,39 @@ class PlannerAgent:
         return updated
 
     def _persist_briefing(self, briefing: DailyBriefing) -> int:
+        all_tasks = list(briefing.tasks)
+
+        if briefing.newsletter_reading and briefing.newsletter_reading.articles:
+            nr = briefing.newsletter_reading
+            article_lines = []
+            for a in nr.articles:
+                article_lines.append(f"[{a.priority}] {a.title} — {a.url}")
+            full_description = nr.description + "\n\n" + "\n".join(article_lines)
+
+            nr_task = Task(
+                title=nr.title,
+                description=full_description,
+                task_type=TaskType.READ,
+                track=briefing.focus_track,
+                phase=briefing.focus_phase,
+                priority=Priority.MEDIUM,
+                estimated_hours=nr.estimated_hours,
+                resource_url=nr.articles[0].url if nr.articles else "",
+                resource_name=nr.title,
+                why="Curated newsletter articles relevant to today's focus.",
+                status=TaskStatus.PENDING,
+                assigned_date=datetime.fromisoformat(briefing.date),
+            )
+            all_tasks.append(nr_task)
+
         task_ids = []
-        for task in briefing.tasks:
+        for task in all_tasks:
             task_id = self.state.add_task(task)
             task_ids.append(task_id)
 
         tasks_json = json.dumps([
             {"db_id": tid, **t.model_dump(mode="json")}
-            for tid, t in zip(task_ids, briefing.tasks, strict=True)
+            for tid, t in zip(task_ids, all_tasks, strict=True)
         ])
 
         briefing_id = self.state.save_briefing(

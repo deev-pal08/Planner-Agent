@@ -10,7 +10,12 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+.claude/
 *.swp
+
+# Personal config
+config.yaml
+AboutMe.md
 
 # Build
 dist/

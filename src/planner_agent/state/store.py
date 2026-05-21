@@ -269,6 +269,16 @@ class StateStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_consumed_article_urls(self) -> set[str]:
+        """Return all resource_urls from completed tasks — these are 'already read'."""
+        rows = self._conn.execute(
+            """SELECT DISTINCT resource_url FROM tasks
+               WHERE status = 'done'
+               AND resource_url != ''
+               AND resource_url IS NOT NULL""",
+        ).fetchall()
+        return {r["resource_url"] for r in rows}
+
     # --- Achievements ---
 
     def add_achievement(self, achievement: Achievement) -> int:

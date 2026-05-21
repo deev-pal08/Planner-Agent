@@ -74,6 +74,7 @@ class TrackConfig(BaseModel):
 class NewsletterConfig(BaseModel):
     project_dir: str = ""
     enabled: bool = False
+    stale_threshold_days: int = 7
 
 
 class AppConfig(BaseModel):
@@ -87,7 +88,7 @@ class AppConfig(BaseModel):
     tracks: dict[str, TrackConfig] = Field(default_factory=lambda: {
         "web_appsec": TrackConfig(
             name="Web Application Security",
-            current_phase="practice",
+            current_phase="learn",
             priority="high",
         ),
         "ai_security": TrackConfig(
@@ -102,7 +103,7 @@ class AppConfig(BaseModel):
         ),
         "bug_bounty": TrackConfig(
             name="Bug Bounty Hunting",
-            current_phase="practice",
+            current_phase="learn",
             priority="high",
         ),
         "content_creation": TrackConfig(
@@ -112,7 +113,7 @@ class AppConfig(BaseModel):
         ),
         "code_review": TrackConfig(
             name="Advanced Code Review",
-            current_phase="practice",
+            current_phase="learn",
             priority="medium",
         ),
     })
