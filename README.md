@@ -53,35 +53,38 @@ Reads articles from the [Newsletter Agent](https://github.com/deev-pal08/newslet
 ## Quick Start
 
 ```bash
-# 1. Clone the repo
+# 1. Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Clone the repo
 git clone https://github.com/deev-pal08/Planner-Agent.git
 cd Planner-Agent
 
-# 2. Install dependencies
+# 3. Install dependencies
 uv sync
 
-# 3. Set up your profile
+# 4. Set up your profile
 cp AboutMe.example.md AboutMe.md
 # Edit AboutMe.md — your skills, experience, goals, and honest self-assessment
 
-# 4. Set up your config
+# 5. Set up your config
 cp config.example.yaml config.yaml
 # Edit config.yaml — email addresses, time budget, skill tracks
 
-# 5. Set up API keys
+# 6. Set up API keys
 cp .env.example .env
 # Fill in: ANTHROPIC_API_KEY, RESEND_API_KEY, IMAP_EMAIL, IMAP_PASSWORD
 
-# 6. Initialize skill tracks
+# 7. Initialize skill tracks
 uv run planner init
 
-# 7. Preview your first briefing
+# 8. Preview your first briefing
 uv run planner daily --no-email
 
-# 8. Send for real
+# 9. Send for real
 uv run planner daily
 
-# 9. Reply to the email with your progress, then:
+# 10. Reply to the email with your progress, then:
 uv run planner process-replies
 
 # 10. (Optional) Install daily schedule
