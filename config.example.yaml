@@ -1,0 +1,67 @@
+# Planner Agent Configuration
+
+# User profile — shared with Newsletter Agent
+about_me: "AboutMe.md"
+
+# LLM settings
+llm:
+  model: "claude-haiku-4-5"           # Daily briefing generation (cheap, fast)
+  research_model: "claude-sonnet-4-6"  # Research tasks, skill assessment (smarter)
+  max_tokens: 4096
+
+# Email — outbound daily briefing
+email:
+  enabled: true
+  from_address: "planner@yourdomain.com"
+  to_addresses:
+    - "your@gmail.com"
+
+# IMAP — inbound feedback via email replies
+imap:
+  enabled: true
+  server: "imap.gmail.com"
+  port: 993
+  mailbox: "INBOX"
+
+# Schedule
+schedule:
+  briefing_time: "07:00"     # When to send daily briefing
+  timezone: "Europe/London"
+
+# Weekly time budget (hours)
+time_budget:
+  weekday: 4          # hours available per weekday
+  weekend_day: 6      # hours available per weekend day
+  max_weekly: 25       # hard ceiling per week
+
+# Newsletter Agent integration
+newsletter:
+  project_dir: ""   # path to newsletter-agent project (for CLI invocation)
+  enabled: false     # set to true once newsletter-agent is configured
+
+# Skill tracks and their target phases by month 6
+tracks:
+  web_appsec:
+    name: "Web Application Security"
+    current_phase: "practice"    # learn → practice → produce
+    priority: "high"
+  ai_security:
+    name: "AI/ML Security"
+    current_phase: "learn"
+    priority: "critical"
+  agent_engineering:
+    name: "AI Agent Engineering"
+    current_phase: "learn"
+    priority: "high"
+  bug_bounty:
+    name: "Bug Bounty Hunting"
+    current_phase: "practice"
+    priority: "high"
+  content_creation:
+    name: "Content & Research Publishing"
+    current_phase: "learn"
+    priority: "medium"
+  code_review:
+    name: "Advanced Code Review"
+    current_phase: "practice"
+    priority: "medium"
