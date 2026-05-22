@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 class LLMConfig(BaseModel):
     model: str = "claude-haiku-4-5"
     research_model: str = "claude-sonnet-4-6"
-    max_tokens: int = 8192
+    max_tokens: int = 16384
     api_key_env: str = "ANTHROPIC_API_KEY"
 
     @property

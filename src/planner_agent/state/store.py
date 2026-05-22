@@ -10,12 +10,7 @@ from typing import Any
 
 from planner_agent.models import (
     Achievement,
-    AchievementType,
-    Phase,
-    Priority,
     Task,
-    TaskStatus,
-    TaskType,
 )
 
 CREATE_TABLES = """
@@ -411,6 +406,46 @@ class StateStore:
                ORDER BY f.received_at DESC
                LIMIT 20""",
             (f"-{days} days",),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_cumulative_track_stats(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT
+                t.track,
+                COUNT(*) as total_tasks,
+                SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) as done,
+                SUM(CASE WHEN t.status = 'skipped' THEN 1 ELSE 0 END) as skipped,
+                SUM(CASE WHEN t.status = 'done'
+                    THEN COALESCE(t.actual_hours, t.estimated_hours) ELSE 0 END) as hours,
+                MAX(CASE WHEN t.status = 'done' THEN t.completed_date END) as last_completed,
+                MIN(t.assigned_date) as first_assigned
+               FROM tasks t
+               GROUP BY t.track
+               ORDER BY hours DESC""",
+        ).fetchall()
+        result = []
+        for r in rows:
+            row = dict(r)
+            type_rows = self._conn.execute(
+                """SELECT task_type, COUNT(*) as cnt
+                   FROM tasks WHERE track = ? AND status = 'done'
+                   GROUP BY task_type ORDER BY cnt DESC LIMIT 3""",
+                (row["track"],),
+            ).fetchall()
+            row["top_task_types"] = [(tr["task_type"], tr["cnt"]) for tr in type_rows]
+            result.append(row)
+        return result
+
+    def get_all_feedback_with_content(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT f.notes, f.learnings, f.status, f.actual_hours,
+                      f.received_at, t.title, t.track, t.task_type
+               FROM feedback_log f
+               JOIN tasks t ON f.task_id = t.id
+               WHERE (f.notes IS NOT NULL AND f.notes != '')
+                  OR (f.learnings IS NOT NULL AND f.learnings != '')
+               ORDER BY f.received_at DESC""",
         ).fetchall()
         return [dict(r) for r in rows]
 

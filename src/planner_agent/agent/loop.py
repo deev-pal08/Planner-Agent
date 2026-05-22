@@ -11,6 +11,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from planner_agent.agent.prompts import (
     FEEDBACK_PARSE_PROMPT,
+    SUMMARY_UPDATE_PROMPT,
     SYSTEM_PROMPT,
     build_briefing_context,
 )
@@ -199,6 +200,8 @@ class PlannerAgent:
         completion_stats = self.state.get_completion_stats(days=7)
         skipped_patterns = self.state.get_skipped_patterns(days=14)
         feedback_notes = self.state.get_recent_feedback_notes(days=14)
+        cumulative_track_stats = self.state.get_cumulative_track_stats()
+        learning_summary = self.state.get_meta("learning_summary")
 
         # Newsletter integration (read-only, graceful degradation)
         newsletter_articles = None
@@ -257,6 +260,8 @@ class PlannerAgent:
             newsletter_articles=newsletter_articles,
             newsletter_meta=newsletter_meta,
             feedback_notes=feedback_notes,
+            cumulative_track_stats=cumulative_track_stats,
+            learning_summary=learning_summary,
         )
 
         logger.info(
@@ -415,6 +420,98 @@ class PlannerAgent:
                 )
 
         return updated
+
+    def update_learning_summary(
+        self, feedback: EmailFeedback | None = None, briefing_tasks: list[dict] | None = None,
+    ) -> str:
+        """Update the rolling learning summary after feedback is applied."""
+        current_summary = self.state.get_meta("learning_summary") or ""
+
+        new_feedback_lines = []
+        if feedback and briefing_tasks:
+            for entry in feedback.task_updates:
+                idx = entry.task_id - 1
+                if 0 <= idx < len(briefing_tasks):
+                    task = briefing_tasks[idx]
+                    parts = [
+                        f"[{task.get('track', '')}] {task.get('title', '')}",
+                        f"Status: {entry.status}",
+                    ]
+                    if entry.actual_hours:
+                        parts.append(f"Hours: {entry.actual_hours}")
+                    if entry.notes:
+                        parts.append(f"Notes: {entry.notes}")
+                    if entry.learnings:
+                        parts.append(f"Learnings: {entry.learnings}")
+                    new_feedback_lines.append(" | ".join(parts))
+            if feedback.general_notes:
+                new_feedback_lines.append(f"General: {feedback.general_notes}")
+
+        all_feedback = self.state.get_all_feedback_with_content()
+        historical_lines = []
+        for f in all_feedback[:50]:
+            parts = [f"[{f.get('track', '')}] {f.get('title', '')}"]
+            if f.get("notes"):
+                parts.append(f"Notes: {f['notes']}")
+            if f.get("learnings"):
+                parts.append(f"Learnings: {f['learnings']}")
+            parts.append(f"({str(f.get('received_at', ''))[:10]})")
+            historical_lines.append(" | ".join(parts))
+
+        cumulative_stats = self.state.get_cumulative_track_stats()
+        stats_lines = []
+        for s in cumulative_stats:
+            done = s.get("done", 0) or 0
+            skipped = s.get("skipped", 0) or 0
+            hours = s.get("hours", 0) or 0
+            stats_lines.append(
+                f"- {s['track']}: {done} done, {skipped} skipped, {hours:.1f}h"
+            )
+
+        prompt_parts = []
+        if current_summary:
+            prompt_parts.append(f"## CURRENT SUMMARY\n{current_summary}")
+        else:
+            prompt_parts.append("## CURRENT SUMMARY\n(No summary yet — this is the first update.)")
+
+        if new_feedback_lines:
+            prompt_parts.append(
+                "## NEW FEEDBACK (just received)\n" + "\n".join(new_feedback_lines)
+            )
+
+        if historical_lines:
+            prompt_parts.append(
+                "## ALL HISTORICAL FEEDBACK (most recent first)\n"
+                + "\n".join(historical_lines)
+            )
+
+        if stats_lines:
+            prompt_parts.append(
+                "## CUMULATIVE TRACK STATS\n" + "\n".join(stats_lines)
+            )
+
+        prompt_parts.append(
+            "## INSTRUCTION\n"
+            "Produce the updated learning summary. Merge the new feedback into the "
+            "existing summary. Preserve important older insights. Remove anything "
+            "superseded by newer evidence. Stay under 800 words."
+        )
+
+        response = self._call_claude(
+            model=self.config.llm.model,
+            max_tokens=2048,
+            system=SUMMARY_UPDATE_PROMPT,
+            messages=[{"role": "user", "content": "\n\n".join(prompt_parts)}],
+        )
+        self._log_usage(response, self.config.llm.model)
+
+        updated_summary = response.content[0].text.strip()
+        self.state.set_meta("learning_summary", updated_summary)
+        logger.info(
+            "Learning summary updated (%d chars)",
+            len(updated_summary),
+        )
+        return updated_summary
 
     def _persist_briefing(self, briefing: DailyBriefing) -> int:
         all_tasks = list(briefing.tasks)

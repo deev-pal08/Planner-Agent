@@ -4,12 +4,13 @@ Adaptive daily task orchestrator for security career growth. Reads your current 
 
 ## How It Works
 
-1. **Reads your state** from SQLite — skill tracks, completed tasks, skip patterns, feedback notes, portfolio gaps, newsletter articles
-2. **Generates** hyper-specific daily tasks via a Claude Sonnet agent loop — verifies every resource URL is live, searches your past learnings to avoid repeats, names exact lab titles, paper URLs, challenge names, and rationale for each task
+1. **Reads your state** from SQLite — skill tracks, completed tasks, skip patterns, feedback notes, portfolio gaps, newsletter articles, cumulative track stats, and a rolling learning summary
+2. **Generates** hyper-specific daily tasks via a Claude Sonnet agent loop — verifies every resource URL is live and extracts actual page titles, searches your past learnings to avoid repeats, names exact lab titles, paper URLs, challenge names, and rationale for each task
 3. **Delivers** a styled HTML briefing email via Resend with priority-colored task cards, newsletter reading block, portfolio gap alerts, and skill observations
-4. **Receives feedback** via email reply — you reply naturally ("Done 1 and 3. Skipped 2 — too dense. Spent 3h total.")
+4. **Receives feedback** via email reply — you reply naturally ("Done 1 and 3. Skipped 2 — too dense. Spent 3h total.") or with detailed paragraphs about what you learned
 5. **Parses feedback** via Claude Haiku into structured task updates, shows parsed results for confirmation before writing to the database
-6. **Adapts** — the next briefing sees your accumulated progress, feedback notes, and learnings, then adjusts difficulty, focus track, task types, and phase progression accordingly
+6. **Updates long-term memory** — Claude Haiku maintains a rolling learning summary capturing your preferences, difficulty calibration, and key insights across all time
+7. **Adapts** — the next briefing sees your accumulated progress, long-term memory, and recent feedback, then adjusts difficulty, focus track, task types, and phase progression accordingly
 
 ```
 planner daily → Claude agent loop → verifies URLs → searches learnings
@@ -19,8 +20,10 @@ planner daily → Claude agent loop → verifies URLs → searches learnings
                                                         ↓
 planner process-replies → Claude Haiku parses reply → shows parsed feedback
                     → you confirm → updates DB (tasks, skills, hours)
+                    → updates rolling learning summary (long-term memory)
                                                         ↓
-                                        Next planner daily sees updated state
+                                        Next planner daily sees updated state,
+                                    cumulative stats, and learning summary —
                                              and adapts accordingly
 ```
 
@@ -42,10 +45,10 @@ Unlike a simple prompt-and-respond setup, the briefing generator runs as a multi
 
 | Tool | Purpose | How it works |
 |------|---------|--------------|
-| `verify_url` | Checks if a resource URL is live | HEAD request via httpx, follows redirects, 5s timeout |
+| `verify_url` | Checks if a resource URL is live and gets the real title | GET request via httpx, extracts `<title>` tag, follows redirects, 10s timeout |
 | `search_learnings` | Searches your past task learnings | SQLite LIKE query against completed task titles and learnings |
 
-Claude calls `search_learnings` before assigning tasks to check what you've already studied, and calls `verify_url` on every resource URL before including it in a task. Dead links are replaced with alternatives. The loop runs up to 10 iterations before extracting the final JSON output.
+Claude calls `search_learnings` before assigning tasks to check what you've already studied, and calls `verify_url` on every resource URL before including it in a task. Dead links are replaced with alternatives. The returned page title is used as the task title — Claude never uses titles from its own memory, which may be outdated or wrong. The loop runs up to 10 iterations before extracting the final JSON output.
 
 ## Newsletter Integration
 
@@ -135,7 +138,7 @@ Copy `config.example.yaml` to `config.yaml` and customize:
 - **about_me**: Path to your `AboutMe.md` profile
 - **llm.model**: `claude-haiku-4-5` for feedback parsing (cheap, fast)
 - **llm.research_model**: `claude-sonnet-4-6` for briefing generation (smarter)
-- **llm.max_tokens**: Output token limit for briefing generation (default: 8192)
+- **llm.max_tokens**: Output token limit for briefing generation (default: 16384)
 - **email**: Resend delivery settings (from/to addresses)
 - **imap**: Gmail IMAP settings for reply polling
 - **schedule**: Daily briefing time (must be HH:MM format) and timezone
@@ -179,6 +182,31 @@ The agent adapts through accumulated state, not hardcoded rules:
 | Portfolio gaps | `0 research papers, 0 CVEs` | Prioritizes tracks that close gaps |
 | Past learnings (via tool) | `search_learnings("JWT")` → prior work found | Assigns advanced material, not basics |
 | Newsletter coverage | `13 unread articles, 0 on AI security` | Suggests newsletter agent searches for missing topics |
+| **Cumulative track stats** | `web_appsec: 72% completion, 9 skipped, last active 17 days ago` | Detects stale tracks, adjusts based on all-time patterns |
+| **Learning summary** | `"SSRF basics too easy, prefers papers over videos, ready for practice phase"` | Calibrates difficulty and resource types using all historical feedback |
+
+## Long-Term Memory
+
+The agent maintains two layers of long-term memory that persist across all briefings, ensuring task quality doesn't degrade as data accumulates over months:
+
+### Cumulative Track Stats (SQL, $0/day)
+
+All-time per-track statistics computed directly from the database:
+- Tasks completed and skipped with completion rate
+- Total hours invested
+- Most common task types (read, lab, ctf, etc.)
+- First and last active dates (detects stale tracks)
+
+### Rolling Learning Summary (Claude Haiku, ~$0.001/day)
+
+An ~800-word summary maintained by Claude Haiku that captures signals the raw data can't express:
+- **Difficulty calibration**: "SSRF basics too easy — skip beginner labs"
+- **Resource preferences**: "Prefers papers over videos, engages best with PortSwigger research-level content"
+- **Skip reasons**: "Skips writing tasks consistently — may need smaller scope"
+- **Key learnings**: "Strong grasp of prompt injection taxonomy, understands indirect PI variants"
+- **Phase readiness**: "Ready for ai_security practice phase as of week 8"
+
+The summary is updated after every `process-replies`, `complete` (with notes), and `skip` (with reason). It's stored in the `meta` table and injected into every future briefing prompt — so feedback you give on day 3 still influences tasks assigned on day 180.
 
 ## Task Specificity Rule
 
@@ -203,8 +231,8 @@ src/planner_agent/
 ├── models.py            # Pydantic models (Task, Skill, Achievement, NewsletterReading)
 ├── scheduling.py        # launchd/cron scheduling
 ├── agent/
-│   ├── loop.py          # Claude API agent loop — tools, retry, token logging
-│   └── prompts.py       # System prompt + context builder (with feedback notes)
+│   ├── loop.py          # Claude API agent loop — tools, retry, token logging, summary updates
+│   └── prompts.py       # System prompt, summary prompt, context builder
 ├── email/
 │   ├── sender.py        # Resend API email sender (briefing + plain-text fallback)
 │   ├── receiver.py      # IMAP reply polling (dynamic lookback)
@@ -225,12 +253,13 @@ All state lives in `data/planner.db` (SQLite, WAL mode):
 | `achievements` | Portfolio items — CVEs, papers, talks, Hall of Fames, etc. |
 | `daily_briefings` | Briefing history with full tasks JSON and email message IDs |
 | `feedback_log` | All feedback received (email or CLI) with notes and learnings |
-| `meta` | Key-value metadata (last briefing date, etc.) |
+| `meta` | Key-value metadata (last briefing date, rolling learning summary, etc.) |
 
 ## Architecture
 
-- **Agent loop with tools**: Claude Sonnet runs a multi-turn loop (up to 10 iterations) with `verify_url` and `search_learnings` tools. URLs are verified live; past learnings are searched to avoid repeating material.
-- **Two models**: Claude Sonnet for briefing generation (needs reasoning + tool use), Claude Haiku for feedback parsing (cheap, fast)
+- **Agent loop with tools**: Claude Sonnet runs a multi-turn loop (up to 10 iterations) with `verify_url` and `search_learnings` tools. URLs are verified live with page title extraction; past learnings are searched to avoid repeating material.
+- **Two models**: Claude Sonnet for briefing generation (needs reasoning + tool use), Claude Haiku for feedback parsing and learning summary updates (cheap, fast)
+- **Long-term memory**: Cumulative track stats (SQL-computed, all-time) and a rolling learning summary (Claude Haiku-maintained, ~800 words) are injected into every briefing prompt. The summary captures difficulty preferences, resource type preferences, skip reasons, key learnings, and phase readiness signals — ensuring day 180 is as well-calibrated as day 1.
 - **Retry logic**: All API calls wrapped with tenacity — 3 attempts with exponential backoff on transient errors
 - **Token logging**: Input/output token counts logged after every API call; warning when output tokens exceed 80% of `max_tokens`
 - **Dedup protection**: Same-day briefing runs blocked unless `--force` passed; stale pending tasks cleaned on force
@@ -261,8 +290,9 @@ uv run planner install-schedule --uninstall
 |---------|---------|-------|
 | Claude Sonnet (briefing) | ~$0.03-0.05 | Agent loop with tool calls (typically 3-4 API turns) |
 | Claude Haiku (feedback) | ~$0.001 | 1 API call per reply parsed |
+| Claude Haiku (summary) | ~$0.001 | 1 API call to update rolling learning summary |
 
-Total: ~$0.03-0.05 per daily run.
+Total: ~$0.03-0.05 per daily cycle (briefing + feedback + summary update).
 
 ## Tests
 

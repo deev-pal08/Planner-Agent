@@ -215,11 +215,22 @@ def complete(ctx: click.Context, task_id: int, hours: float | None, notes: str) 
         learnings=notes, source="cli",
     )
 
+    track = task.get("track", "")
+    if track:
+        state.update_skill_hours(track, hours or task.get("estimated_hours", 0))
+
     click.echo(f"Task #{task_id} marked as done: {task['title']}")
     if hours:
         click.echo(f"  Hours: {hours}")
     if notes:
         click.echo(f"  Notes: {notes}")
+
+    if notes:
+        from planner_agent.agent.loop import PlannerAgent
+
+        agent = PlannerAgent(config, state)
+        click.echo("Updating learning summary...")
+        agent.update_learning_summary()
 
 
 @cli.command()
@@ -238,6 +249,13 @@ def skip(ctx: click.Context, task_id: int, reason: str) -> None:
         task_id=task_id, status="skipped", notes=reason, source="cli",
     )
     click.echo(f"Task #{task_id} marked as skipped.")
+
+    if reason:
+        from planner_agent.agent.loop import PlannerAgent
+
+        agent = PlannerAgent(config, state)
+        click.echo("Updating learning summary...")
+        agent.update_learning_summary()
 
 
 @cli.command()
@@ -518,6 +536,10 @@ def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -
         return 0
 
     updated = agent.apply_feedback(feedback, briefing_tasks)
+
+    if updated > 0:
+        click.echo("Updating learning summary...")
+        agent.update_learning_summary(feedback=feedback, briefing_tasks=briefing_tasks)
 
     return updated
 

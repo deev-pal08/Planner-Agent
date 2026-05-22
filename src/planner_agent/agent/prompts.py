@@ -175,6 +175,39 @@ You have two tools you MUST use:
    or skip to practice/produce phase tasks.
 """
 
+SUMMARY_UPDATE_PROMPT = """\
+You are maintaining a rolling learning summary for a Security Engineer's career development. \
+This summary is the agent's long-term memory — it persists across all future briefings and \
+captures insights that would otherwise be lost as detailed feedback ages out of the recent window.
+
+Your job: merge the CURRENT SUMMARY with NEW FEEDBACK to produce an UPDATED SUMMARY.
+
+## What to capture:
+- **Difficulty calibration per track**: what's too easy, what's appropriately challenging, \
+what's too hard
+- **Resource preferences**: types the user engages with best (papers vs labs vs videos vs CTFs)
+- **Skip patterns and reasons**: not just that something was skipped, but WHY — too basic, \
+too dense, wrong timing, not interesting
+- **Key learnings and breakthroughs**: concepts the user has internalized, "aha" moments
+- **Confidence signals**: when the user demonstrates deep understanding vs surface-level completion
+- **Quality feedback on specific resources**: which platforms/authors/formats work well
+- **General preferences**: study pace, time-of-day patterns, preferred task ordering
+- **Phase readiness signals**: evidence of whether the user is ready for practice/produce phase
+
+## Rules:
+- Keep the summary under 800 words — this is injected into every future briefing prompt
+- Organize by skill track, with a "General" section for cross-cutting preferences
+- When new feedback contradicts older summary content, UPDATE the summary (preferences evolve)
+- Remove stale observations that have been superseded by newer evidence
+- Use concise, factual language — no filler, no hedging
+- Preserve the user's own words when they express strong preferences
+- Include dates for time-sensitive observations (e.g., "as of 2026-06-15, ready for practice")
+
+## Output format:
+Return ONLY the updated summary text (no JSON, no markdown code fences, no preamble). \
+Start directly with the content.
+"""
+
 FEEDBACK_PARSE_PROMPT = """\
 Parse this email reply into structured task feedback. The email is a reply to a daily \
 planner briefing that assigned specific numbered tasks.
@@ -222,6 +255,8 @@ def build_briefing_context(
     newsletter_articles: dict[str, list[dict]] | None = None,
     newsletter_meta: dict | None = None,
     feedback_notes: list[dict] | None = None,
+    cumulative_track_stats: list[dict] | None = None,
+    learning_summary: str | None = None,
 ) -> str:
     """Build the user message with full state context for Claude."""
     sections = []
@@ -244,6 +279,41 @@ def build_briefing_context(
                 f"{hours:.1f}h invested, {items} items completed"
             )
         sections.append("\n".join(lines))
+
+    # Cumulative track stats (all-time)
+    if cumulative_track_stats:
+        lines = ["## CUMULATIVE TRACK PROGRESS (all-time)"]
+        for s in cumulative_track_stats:
+            done = s.get("done", 0) or 0
+            skipped_count = s.get("skipped", 0) or 0
+            total = s.get("total_tasks", 0) or 0
+            hours = s.get("hours", 0) or 0
+            rate = (done / (done + skipped_count) * 100) if (done + skipped_count) > 0 else 0
+            last = str(s.get("last_completed") or "never")[:10]
+            first = str(s.get("first_assigned") or "")[:10]
+            top_types = ", ".join(
+                f"{tt[0]}({tt[1]})" for tt in s.get("top_task_types", [])
+            )
+            line = (
+                f"- {s['track']}: {done}/{total} done ({rate:.0f}%), "
+                f"{skipped_count} skipped, {hours:.1f}h total"
+            )
+            if top_types:
+                line += f" | Top types: {top_types}"
+            if first:
+                line += f" | Active: {first} → {last}"
+            lines.append(line)
+        sections.append("\n".join(lines))
+
+    # Learning summary (Claude-maintained rolling memory)
+    if learning_summary:
+        sections.append(
+            "## LEARNING SUMMARY (long-term memory)\n"
+            "This summary captures the user's preferences, difficulty calibration, "
+            "resource quality feedback, and key learnings accumulated over all time. "
+            "Use it to calibrate task difficulty, resource types, and focus areas.\n\n"
+            f"{learning_summary}"
+        )
 
     # Recent completion stats
     if completion_stats:

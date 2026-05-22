@@ -53,9 +53,12 @@ uv run ruff check src/                  # lint
 ```
 
 ## Architecture
-- **Agent loop**: Read state from SQLite → build context prompt (with feedback notes) → Claude Sonnet runs agent loop with `verify_url` and `search_learnings` tools → generates structured JSON → parse into Task objects → persist to DB → render HTML → send via Resend
-- **Tool use**: `verify_url` checks every resource URL is live before including it. `search_learnings` searches completed task learnings to avoid repeating material.
-- **Feedback loop**: `process-replies` polls IMAP → finds latest reply to `[Planner]` email → Claude Haiku parses natural language into structured feedback → shows parsed results → prompts for confirmation → updates task statuses, hours, and learnings
+- **Agent loop**: Read state from SQLite → build context prompt (with feedback notes, cumulative stats, learning summary) → Claude Sonnet runs agent loop with `verify_url` and `search_learnings` tools → generates structured JSON → parse into Task objects → persist to DB → render HTML → send via Resend
+- **Tool use**: `verify_url` does a GET request, extracts `<title>` tag from HTML, returns `page_title`. Claude must use the returned title, not titles from its own memory. `search_learnings` searches completed task learnings to avoid repeating material.
+- **Long-term memory**: Two layers injected into every briefing prompt:
+  1. **Cumulative track stats** (SQL, $0): all-time per-track done/skipped counts, completion rate, hours, top task types, first/last active dates
+  2. **Rolling learning summary** (Haiku, ~$0.001/update): Claude-maintained ~800-word summary of user preferences, difficulty calibration, skip reasons, key learnings, resource quality feedback, phase readiness signals. Stored in `meta` table as `learning_summary`. Updated after `process-replies`, `complete` (with notes), `skip` (with reason).
+- **Feedback loop**: `process-replies` polls IMAP → finds latest reply → Claude Haiku parses feedback → shows parsed results → prompts for confirmation → updates task statuses, hours, learnings → updates rolling learning summary
 - **Newsletter integration**: Reads Newsletter Agent's SQLite DB (read-only). Newsletter articles are rendered as a single reading block (last task), separate from Claude's generated tasks. Persisted as a real task so feedback tracking works.
 - **Retry logic**: All API calls wrapped with tenacity (3 attempts, exponential backoff on APIStatusError)
 - **Dedup protection**: Same-day briefing runs are blocked unless `--force` is passed
@@ -63,18 +66,18 @@ uv run ruff check src/                  # lint
 - **No frameworks**: Raw Anthropic SDK + Pydantic + SQLite. The intelligence is in the prompts.
 
 ## Adaptive Loop
-1. `planner daily` reads full state (skills, tasks, achievements, completion stats, skip patterns, feedback notes, newsletter articles) and sends to Claude
-2. Claude runs agent loop — searches past learnings, verifies URLs, generates tasks adapted to current progress
+1. `planner daily` reads full state (skills, cumulative stats, learning summary, tasks, achievements, completion stats, skip patterns, feedback notes, newsletter articles) and sends to Claude
+2. Claude runs agent loop — searches past learnings, verifies URLs, generates tasks adapted to current progress and long-term memory
 3. User replies to briefing email with natural language progress update
-4. `planner process-replies` parses the latest reply, shows parsed feedback, prompts for confirmation, then updates task statuses and skill hours
-5. Next `planner daily` sees updated state (including feedback notes explaining why tasks were skipped/completed) and adapts
+4. `planner process-replies` parses the latest reply, shows parsed feedback, prompts for confirmation, updates task statuses and skill hours, then updates the rolling learning summary
+5. Next `planner daily` sees updated state (including the evolved learning summary capturing all historical preferences and insights) and adapts
 
 ## Task Specificity Rule
 The system prompt enforces hyper-specific tasks. Never "Complete 2 SSRF labs" — always exact lab titles, URLs, and rationale for why that specific resource.
 
 ## Agent Tools
 Claude has two tools available during briefing generation:
-- **`verify_url`** — HEAD request via httpx to check if a resource URL is live (follows redirects, 5s timeout). Dead URLs are replaced or flagged.
+- **`verify_url`** — GET request via httpx (follows redirects, 10s timeout). Extracts `<title>` tag from HTML and returns `page_title`. Claude must use the returned title as the task title — titles from its own memory are often outdated or wrong.
 - **`search_learnings`** — SQLite LIKE query against completed task learnings and titles. Prevents assigning material the user has already studied.
 
 ## Newsletter Integration
@@ -98,7 +101,7 @@ Every skill follows: Learn → Practice → Produce. The planner tracks which ph
 
 ## Config Validation
 - `briefing_time` must be HH:MM format (e.g. `"07:00"`). Invalid formats like `"7am"` raise a Pydantic ValidationError at config load time.
-- `max_tokens` defaults to 8192. Token usage is logged after every API call; a warning fires when output tokens exceed 80% of the limit.
+- `max_tokens` defaults to 16384. Token usage is logged after every API call; a warning fires when output tokens exceed 80% of the limit.
 
 ## State (SQLite)
 All state lives in `data/planner.db`:
@@ -107,7 +110,7 @@ All state lives in `data/planner.db`:
 - `achievements` — portfolio items (CVEs, papers, talks, etc.)
 - `daily_briefings` — briefing history with tasks JSON and email message IDs
 - `feedback_log` — all feedback received (email or CLI) with notes and learnings
-- `meta` — key-value store (last briefing date, etc.)
+- `meta` — key-value store (last briefing date, rolling learning summary, etc.)
 
 ## Error Handling
 - `BriefingParseError` — raised when Claude's response cannot be parsed as valid briefing JSON. Caught in CLI, prints clear error, exits with code 1.
