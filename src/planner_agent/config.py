@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LLMConfig(BaseModel):
     model: str = "claude-haiku-4-5"
     research_model: str = "claude-sonnet-4-6"
-    max_tokens: int = 4096
+    max_tokens: int = 8192
     api_key_env: str = "ANTHROPIC_API_KEY"
 
     @property
@@ -57,6 +57,19 @@ class IMAPConfig(BaseModel):
 class ScheduleConfig(BaseModel):
     briefing_time: str = "07:00"
     timezone: str = "Europe/London"
+
+    @field_validator("briefing_time")
+    @classmethod
+    def validate_time_format(cls, v: str) -> str:
+        from datetime import datetime as _dt
+
+        try:
+            _dt.strptime(v, "%H:%M")
+        except ValueError as e:
+            raise ValueError(
+                f"briefing_time must be HH:MM format (e.g. '07:00'), got: '{v}'"
+            ) from e
+        return v
 
 
 class TimeBudgetConfig(BaseModel):

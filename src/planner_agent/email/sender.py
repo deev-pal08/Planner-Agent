@@ -43,3 +43,16 @@ class EmailSender:
         message_id = response.get("id", "") if isinstance(response, dict) else ""
         logger.info("Briefing email sent: %s (message_id=%s)", subject, message_id)
         return message_id
+
+    def send_plain(self, subject: str, body: str) -> str:
+        """Send a plain-text email (e.g. failure notifications). Returns message ID."""
+        params: resend.Emails.SendParams = {
+            "from": self.from_address,
+            "to": self.to_addresses,
+            "subject": subject,
+            "text": body,
+        }
+        response = resend.Emails.send(params)
+        message_id = response.get("id", "") if isinstance(response, dict) else ""
+        logger.info("Plain email sent: %s (message_id=%s)", subject, message_id)
+        return message_id

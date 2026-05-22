@@ -37,22 +37,75 @@ def cli(ctx: click.Context, config: str, verbose: bool) -> None:
 
 
 @cli.command()
-@click.option("--date", "-d", default=None, help="Generate briefing for a specific date (YYYY-MM-DD)")
-@click.option("--no-email", is_flag=True, help="Print briefing to terminal, don't send email")
+@click.option("--date", "-d", default=None, help="Briefing date (YYYY-MM-DD)")
+@click.option("--no-email", is_flag=True, help="Print to terminal, don't send email")
+@click.option("--force", is_flag=True, help="Regenerate if briefing exists for today")
 @click.pass_context
-def daily(ctx: click.Context, date: str | None, no_email: bool) -> None:
+def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> None:
     """Full daily cycle: generate briefing, send email."""
     config = ctx.obj["config"]
 
-    from planner_agent.agent.loop import PlannerAgent
+    from planner_agent.agent.loop import BriefingParseError, PlannerAgent
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
     agent = PlannerAgent(config, state)
 
+    from datetime import UTC, datetime
+
+    today = date or datetime.now(UTC).strftime("%Y-%m-%d")
+
+    # Issue 6: dedup check
+    if not force and state.briefing_exists_for_date(today):
+        click.echo(f"Briefing already generated for {today}. Use --force to regenerate.")
+        return
+
+    if force and state.briefing_exists_for_date(today):
+        deleted = state.delete_pending_tasks_for_date(today)
+        if deleted:
+            click.echo(f"Cleared {deleted} pending tasks from previous briefing.")
+
     # Step 1: Generate today's briefing
     click.echo("Generating daily briefing...")
-    briefing = agent.generate_briefing(target_date=date)
+    try:
+        briefing = agent.generate_briefing(target_date=date)
+    except (BriefingParseError, Exception) as e:
+        click.echo(click.style(f"\nBriefing generation failed: {e}", fg="red"))
+        # Issue 8: fallback email
+        if not no_email and config.email.enabled and config.email.to_addresses:
+            try:
+                from planner_agent.email.sender import EmailSender
+
+                sender = EmailSender(
+                    api_key=config.email.api_key,
+                    from_address=config.email.from_address,
+                    to_addresses=config.email.to_addresses,
+                )
+                stats = state.get_completion_stats(days=7)
+                last = state.get_last_briefing()
+                last_date = last["date"][:10] if last else "never"
+                total = stats.get("total", 0)
+                done = stats.get("done", 0)
+                rate = (done / total * 100) if total > 0 else 0
+                skills = state.get_all_skills()
+                tracks = ", ".join(s["name"] for s in skills) if skills else "none"
+
+                body = (
+                    f"Briefing generation failed for {today}.\n\n"
+                    f"Error: {e}\n\n"
+                    f"Last briefing: {last_date}\n"
+                    f"Last 7 days: {done}/{total} tasks ({rate:.0f}%)\n"
+                    f"Active tracks: {tracks}\n\n"
+                    f"Check logs for details. Run `planner daily` to retry."
+                )
+                sender.send_plain(
+                    subject=f"[Planner] Briefing Failed — {today}",
+                    body=body,
+                )
+                click.echo("Failure notification email sent.")
+            except Exception as email_err:
+                click.echo(click.style(f"Failed to send notification: {email_err}", fg="red"))
+        sys.exit(1)
 
     # Step 2: Print briefing to terminal
     _print_briefing(briefing)
@@ -82,25 +135,44 @@ def daily(ctx: click.Context, date: str | None, no_email: bool) -> None:
 
 @cli.command()
 @click.option("--date", "-d", default=None, help="Generate for a specific date")
+@click.option("--force", is_flag=True, help="Regenerate if briefing exists")
 @click.pass_context
-def briefing(ctx: click.Context, date: str | None) -> None:
+def briefing(ctx: click.Context, date: str | None, force: bool) -> None:
     """Generate and display daily briefing (no email)."""
     config = ctx.obj["config"]
 
-    from planner_agent.agent.loop import PlannerAgent
+    from planner_agent.agent.loop import BriefingParseError, PlannerAgent
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
     agent = PlannerAgent(config, state)
 
+    from datetime import UTC, datetime
+
+    today = date or datetime.now(UTC).strftime("%Y-%m-%d")
+
+    if not force and state.briefing_exists_for_date(today):
+        click.echo(f"Briefing already generated for {today}. Use --force to regenerate.")
+        return
+
+    if force and state.briefing_exists_for_date(today):
+        deleted = state.delete_pending_tasks_for_date(today)
+        if deleted:
+            click.echo(f"Cleared {deleted} pending tasks from previous briefing.")
+
     click.echo("Generating daily briefing...")
-    b = agent.generate_briefing(target_date=date)
+    try:
+        b = agent.generate_briefing(target_date=date)
+    except BriefingParseError as e:
+        click.echo(click.style(f"\nBriefing generation failed: {e}", fg="red"))
+        sys.exit(1)
     _print_briefing(b)
 
 
 @cli.command(name="process-replies")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (for automation)")
 @click.pass_context
-def process_replies(ctx: click.Context) -> None:
+def process_replies(ctx: click.Context, yes: bool) -> None:
     """Poll inbox for email replies and update task statuses."""
     config = ctx.obj["config"]
 
@@ -110,7 +182,7 @@ def process_replies(ctx: click.Context) -> None:
     state = StateStore(config.state_dir)
     agent = PlannerAgent(config, state)
 
-    count = _process_replies_impl(config, state, agent)
+    count = _process_replies_impl(config, state, agent, auto_confirm=yes)
     if count > 0:
         click.echo(f"Processed {count} task updates from email replies.")
     else:
@@ -129,6 +201,12 @@ def complete(ctx: click.Context, task_id: int, hours: float | None, notes: str) 
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
+
+    task = state.get_task_by_id(task_id)
+    if not task:
+        click.echo(click.style(f"Error: Task #{task_id} not found.", fg="red"))
+        sys.exit(1)
+
     state.update_task_status(
         task_id=task_id, status="done", actual_hours=hours, learnings=notes,
     )
@@ -137,8 +215,7 @@ def complete(ctx: click.Context, task_id: int, hours: float | None, notes: str) 
         learnings=notes, source="cli",
     )
 
-    task = state.get_tasks_for_date("")
-    click.echo(f"Task #{task_id} marked as done.")
+    click.echo(f"Task #{task_id} marked as done: {task['title']}")
     if hours:
         click.echo(f"  Hours: {hours}")
     if notes:
@@ -395,7 +472,7 @@ def history(ctx: click.Context, days: int) -> None:
 
 # --- Internal helpers ---
 
-def _process_replies_impl(config, state, agent) -> int:  # type: ignore[no-untyped-def]
+def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -> int:
     """Process the most recent email reply and update task statuses."""
     last_briefing = state.get_last_briefing()
     if not last_briefing:
@@ -417,6 +494,29 @@ def _process_replies_impl(config, state, agent) -> int:  # type: ignore[no-untyp
 
     briefing_tasks = json.loads(last_briefing.get("tasks_json", "[]"))
     feedback = agent.parse_feedback(reply["body"], briefing_tasks)
+
+    # Issue 1: Show parsed feedback and ask for confirmation
+    click.echo("\nParsed feedback from email reply:")
+    click.echo("-" * 50)
+    for entry in feedback.task_updates:
+        idx = entry.task_id - 1
+        title = briefing_tasks[idx]["title"] if 0 <= idx < len(briefing_tasks) else "?"
+        hours_str = f"{entry.actual_hours}h" if entry.actual_hours else "—"
+        notes_str = entry.notes or entry.learnings or ""
+        click.echo(
+            f"  Task {entry.task_id}: {title}\n"
+            f"    Status: {entry.status}  |  Hours: {hours_str}"
+        )
+        if notes_str:
+            click.echo(f"    Notes: {notes_str}")
+    if feedback.general_notes:
+        click.echo(f"\n  General notes: {feedback.general_notes}")
+    click.echo("-" * 50)
+
+    if not auto_confirm and not click.confirm("Apply these updates to the database?"):
+        click.echo("Aborted. Use `planner complete <id>` to update tasks manually.")
+        return 0
+
     updated = agent.apply_feedback(feedback, briefing_tasks)
 
     return updated

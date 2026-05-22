@@ -156,6 +156,19 @@ Newsletter articles MUST NOT be mixed into the main task list. Instead:
 - Newsletter articles SUPPLEMENT your own resource suggestions, they do not replace them. \
   You should STILL suggest labs, CTFs, courses, papers, and other resources from your \
   own knowledge as the main tasks.
+
+## TOOLS AVAILABLE
+You have two tools you MUST use:
+
+1. **verify_url** — Before including ANY resource URL in a task, call verify_url to check \
+   if the URL is live and accessible. If a URL returns a non-2xx status or is unreachable, \
+   find an alternative resource or note in the task that the URL may need manual verification.
+
+2. **search_learnings** — Before assigning a task on a topic, search the user's completed \
+   task learnings to check what they have already studied. This prevents assigning material \
+   the user has already covered. Search with relevant keywords (e.g., "SSRF", "prompt injection", \
+   "JWT"). If the user has already studied a topic extensively, assign more advanced material \
+   or skip to practice/produce phase tasks.
 """
 
 FEEDBACK_PARSE_PROMPT = """\
@@ -204,6 +217,7 @@ def build_briefing_context(
     today: str,
     newsletter_articles: dict[str, list[dict]] | None = None,
     newsletter_meta: dict | None = None,
+    feedback_notes: list[dict] | None = None,
 ) -> str:
     """Build the user message with full state context for Claude."""
     sections = []
@@ -284,6 +298,20 @@ def build_briefing_context(
         lines = ["## ACHIEVEMENTS LOG"]
         for a in achievements[:20]:
             lines.append(f"- [{a['achievement_type']}] {a['title']}")
+        sections.append("\n".join(lines))
+
+    # Feedback notes
+    if feedback_notes:
+        lines = ["## RECENT FEEDBACK NOTES"]
+        for f in feedback_notes:
+            note = f.get("notes") or ""
+            learning = f.get("learnings") or ""
+            content = note or learning
+            date_str = str(f.get("received_at", ""))[:10]
+            lines.append(
+                f"- [{f.get('track', '')}] \"{content}\" "
+                f"(task: {f.get('title', '')}, {date_str})"
+            )
         sections.append("\n".join(lines))
 
     # Newsletter articles

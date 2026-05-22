@@ -119,7 +119,10 @@ def _build_search(since_date: str | None) -> list[str]:
         imap_date = dt.strftime("%d-%b-%Y")
         criteria.append(f'SINCE {imap_date}')
     else:
-        criteria.append('SINCE "1-Jan-2020"')
+        from datetime import datetime, timedelta
+
+        fallback = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
+        criteria.append(f"SINCE {fallback}")
     return criteria
 
 

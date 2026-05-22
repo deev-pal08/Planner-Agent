@@ -7,32 +7,38 @@ Sends daily briefing via email, receives feedback via email reply, adapts planni
 
 ## Tech Stack
 - Python 3.12, managed with uv
-- Claude API (anthropic SDK) for task generation and feedback parsing
+- Claude API (anthropic SDK) — Sonnet for briefing generation (agent loop with tools), Haiku for feedback parsing
 - Resend API for outbound daily briefing emails
 - IMAP (stdlib) for inbound feedback via email replies
 - Click for CLI
 - Pydantic for config validation and data models
 - SQLite for all state persistence
+- tenacity for API retry logic
+- httpx for URL verification
 - python-dotenv for auto-loading .env
 
 ## Project Structure
 - `src/planner_agent/` — main package (src layout)
-- `src/planner_agent/agent/` — Claude API agent loop and prompts
+- `src/planner_agent/agent/` — Claude API agent loop, tools, and prompts
 - `src/planner_agent/email/` — Resend sender + IMAP receiver + HTML templates
 - `src/planner_agent/state/` — SQLite state persistence + newsletter DB reader
 - `src/planner_agent/models.py` — Pydantic models (Task, Skill, Achievement, NewsletterReading, etc.)
-- `src/planner_agent/config.py` — Pydantic config validation
+- `src/planner_agent/config.py` — Pydantic config validation with field validators
 - `src/planner_agent/scheduling.py` — launchd/cron scheduling
 - `AboutMe.md` — user profile (shared with Newsletter Agent)
 - `config.yaml` — operational config
-- `tests/` — test suite
+- `tests/` — test suite (test_store.py, test_loop.py)
 
 ## Key Commands
 ```bash
 uv run planner daily                    # generate briefing + send email
 uv run planner daily --no-email         # generate briefing, print to terminal only
-uv run planner process-replies          # parse latest email reply, update task state
+uv run planner daily --force            # regenerate even if briefing exists for today
+uv run planner daily --date 2026-05-22  # generate briefing for a specific date
+uv run planner process-replies          # parse latest email reply, confirm, update state
+uv run planner process-replies --yes    # skip confirmation (for automation/cron)
 uv run planner briefing                 # generate briefing without email
+uv run planner briefing --force         # regenerate briefing
 uv run planner complete <task_id>       # mark task done via CLI
 uv run planner skip <task_id>           # mark task skipped via CLI
 uv run planner status                   # show progress across all tracks
@@ -42,23 +48,34 @@ uv run planner init                     # initialize skill tracks from config
 uv run planner history                  # show recent completed tasks
 uv run planner install-schedule         # install daily launchd/cron job
 uv run planner install-schedule --uninstall  # remove schedule
+uv run pytest tests/                    # run tests (9 tests)
+uv run ruff check src/                  # lint
 ```
 
 ## Architecture
-- **Agent loop**: Read state from SQLite → build context prompt → Claude generates structured JSON → parse into Task objects → persist to DB → render HTML → send via Resend
-- **Feedback loop**: `process-replies` polls IMAP → finds latest reply to `[Planner]` email → Claude Haiku parses natural language into structured feedback → updates task statuses, hours, and learnings
+- **Agent loop**: Read state from SQLite → build context prompt (with feedback notes) → Claude Sonnet runs agent loop with `verify_url` and `search_learnings` tools → generates structured JSON → parse into Task objects → persist to DB → render HTML → send via Resend
+- **Tool use**: `verify_url` checks every resource URL is live before including it. `search_learnings` searches completed task learnings to avoid repeating material.
+- **Feedback loop**: `process-replies` polls IMAP → finds latest reply to `[Planner]` email → Claude Haiku parses natural language into structured feedback → shows parsed results → prompts for confirmation → updates task statuses, hours, and learnings
 - **Newsletter integration**: Reads Newsletter Agent's SQLite DB (read-only). Newsletter articles are rendered as a single reading block (last task), separate from Claude's generated tasks. Persisted as a real task so feedback tracking works.
+- **Retry logic**: All API calls wrapped with tenacity (3 attempts, exponential backoff on APIStatusError)
+- **Dedup protection**: Same-day briefing runs are blocked unless `--force` is passed
+- **Fallback email**: If briefing generation fails, a plain-text notification email is sent with error details and last known state
 - **No frameworks**: Raw Anthropic SDK + Pydantic + SQLite. The intelligence is in the prompts.
 
 ## Adaptive Loop
-1. `planner daily` reads full state (skills, tasks, achievements, completion stats, skip patterns, newsletter articles) and sends to Claude
-2. Claude generates tasks adapted to current progress — won't repeat completed resources, adjusts difficulty as hours accumulate, flags skip patterns
+1. `planner daily` reads full state (skills, tasks, achievements, completion stats, skip patterns, feedback notes, newsletter articles) and sends to Claude
+2. Claude runs agent loop — searches past learnings, verifies URLs, generates tasks adapted to current progress
 3. User replies to briefing email with natural language progress update
-4. `planner process-replies` parses the latest reply, updates task statuses and skill hours
-5. Next `planner daily` sees updated state and adapts
+4. `planner process-replies` parses the latest reply, shows parsed feedback, prompts for confirmation, then updates task statuses and skill hours
+5. Next `planner daily` sees updated state (including feedback notes explaining why tasks were skipped/completed) and adapts
 
 ## Task Specificity Rule
 The system prompt enforces hyper-specific tasks. Never "Complete 2 SSRF labs" — always exact lab titles, URLs, and rationale for why that specific resource.
+
+## Agent Tools
+Claude has two tools available during briefing generation:
+- **`verify_url`** — HEAD request via httpx to check if a resource URL is live (follows redirects, 5s timeout). Dead URLs are replaced or flagged.
+- **`search_learnings`** — SQLite LIKE query against completed task learnings and titles. Prevents assigning material the user has already studied.
 
 ## Newsletter Integration
 - `state/newsletter.py` — NewsletterReader reads Newsletter Agent's SQLite DB (read-only, `?mode=ro`)
@@ -79,11 +96,25 @@ Every skill follows: Learn → Practice → Produce. The planner tracks which ph
 - `IMAP_EMAIL` — email address for IMAP login
 - `IMAP_PASSWORD` — app password for IMAP login
 
+## Config Validation
+- `briefing_time` must be HH:MM format (e.g. `"07:00"`). Invalid formats like `"7am"` raise a Pydantic ValidationError at config load time.
+- `max_tokens` defaults to 8192. Token usage is logged after every API call; a warning fires when output tokens exceed 80% of the limit.
+
 ## State (SQLite)
 All state lives in `data/planner.db`:
 - `skills` — skill tracks with phase, hours invested, items completed
 - `tasks` — all assigned tasks with status, time estimates, learnings
 - `achievements` — portfolio items (CVEs, papers, talks, etc.)
 - `daily_briefings` — briefing history with tasks JSON and email message IDs
-- `feedback_log` — all feedback received (email or CLI)
+- `feedback_log` — all feedback received (email or CLI) with notes and learnings
 - `meta` — key-value store (last briefing date, etc.)
+
+## Error Handling
+- `BriefingParseError` — raised when Claude's response cannot be parsed as valid briefing JSON. Caught in CLI, prints clear error, exits with code 1.
+- Invalid task IDs in `complete` and `skip` commands print an error and exit with code 1.
+- API failures trigger 3 retries with exponential backoff before raising.
+- Briefing generation failures send a plain-text notification email with error details.
+
+## Tests
+- `tests/test_store.py` — 5 database roundtrip tests (task CRUD, status updates, skill hours, feedback notes, briefing dedup)
+- `tests/test_loop.py` — 4 JSON parse tests (clean JSON, markdown-fenced, invalid input, empty input)

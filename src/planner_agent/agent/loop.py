@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 
 import anthropic
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from planner_agent.agent.prompts import (
     FEEDBACK_PARSE_PROMPT,
@@ -30,6 +31,49 @@ from planner_agent.state.store import StateStore
 logger = logging.getLogger(__name__)
 
 
+class BriefingParseError(Exception):
+    """Raised when Claude's response cannot be parsed as valid briefing JSON."""
+
+
+TOOLS = [
+    {
+        "name": "verify_url",
+        "description": (
+            "Check if a resource URL is live and accessible. "
+            "Call this on every resource_url before including it in a task."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to verify",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "search_learnings",
+        "description": (
+            "Search the user's completed task learnings and titles by keyword. "
+            "Use this to check what the user has already studied before assigning "
+            "similar material."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword to search for in learnings and task titles",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+]
+
+
 class PlannerAgent:
     def __init__(self, config: AppConfig, state: StateStore):
         self.config = config
@@ -39,6 +83,92 @@ class PlannerAgent:
             api_key=config.llm.api_key,
             base_url="https://api.anthropic.com",
         )
+
+    @retry(
+        retry=retry_if_exception_type(anthropic.APIStatusError),
+        wait=wait_exponential(multiplier=1, min=4, max=60),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    def _call_claude(self, **kwargs):
+        return self._client.messages.create(**kwargs)
+
+    def _log_usage(self, response, model_name: str) -> None:
+        logger.info(
+            "API usage [%s] — input: %d tokens, output: %d tokens",
+            model_name,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+        if response.usage.output_tokens > self.config.llm.max_tokens * 0.8:
+            logger.warning(
+                "Output tokens at %.0f%% of max_tokens — consider increasing limit",
+                response.usage.output_tokens / self.config.llm.max_tokens * 100,
+            )
+
+    def _verify_url(self, url: str) -> dict:
+        try:
+            import httpx
+
+            r = httpx.head(url, follow_redirects=True, timeout=5)
+            return {"url": url, "live": r.status_code < 400, "status": r.status_code}
+        except Exception as e:
+            return {"url": url, "live": False, "error": str(e)}
+
+    def _search_learnings(self, query: str) -> list[dict]:
+        rows = self.state._conn.execute(
+            """SELECT title, learnings, track, completed_date
+               FROM tasks
+               WHERE status = 'done'
+               AND (learnings LIKE ? OR title LIKE ?)
+               ORDER BY completed_date DESC LIMIT 5""",
+            (f"%{query}%", f"%{query}%"),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def _run_agent_loop(self, context: str) -> str:
+        messages: list[dict] = [{"role": "user", "content": context}]
+        max_iterations = 10
+
+        response = None
+        for _ in range(max_iterations):
+            response = self._call_claude(
+                model=self.config.llm.research_model,
+                max_tokens=self.config.llm.max_tokens,
+                system=SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages,
+            )
+            self._log_usage(response, self.config.llm.research_model)
+
+            if response.stop_reason == "end_turn":
+                return next(b.text for b in response.content if b.type == "text")
+
+            if response.stop_reason == "tool_use":
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        if block.name == "verify_url":
+                            result = self._verify_url(**block.input)
+                        elif block.name == "search_learnings":
+                            result = self._search_learnings(**block.input)
+                        else:
+                            result = {"error": f"Unknown tool: {block.name}"}
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": json.dumps(result),
+                        })
+                        logger.info("Tool call: %s(%s)", block.name, block.input)
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+
+        logger.warning("Agent loop hit MAX_ITERATIONS — extracting partial response")
+        if response is not None:
+            final = next((b.text for b in response.content if b.type == "text"), "")
+            if final:
+                return final
+        raise BriefingParseError("Agent loop exhausted iterations with no text response")
 
     def generate_briefing(self, target_date: str | None = None) -> DailyBriefing:
         """Generate a daily briefing with hyper-specific tasks."""
@@ -59,6 +189,7 @@ class PlannerAgent:
         achievement_counts = self.state.get_achievement_counts()
         completion_stats = self.state.get_completion_stats(days=7)
         skipped_patterns = self.state.get_skipped_patterns(days=14)
+        feedback_notes = self.state.get_recent_feedback_notes(days=14)
 
         # Newsletter integration (read-only, graceful degradation)
         newsletter_articles = None
@@ -116,18 +247,15 @@ class PlannerAgent:
             today=today,
             newsletter_articles=newsletter_articles,
             newsletter_meta=newsletter_meta,
+            feedback_notes=feedback_notes,
         )
 
-        logger.info("Generating briefing for %s (%s, %.1fh available)", today, day_of_week, available_hours)
-
-        response = self._client.messages.create(
-            model=self.config.llm.research_model,
-            max_tokens=self.config.llm.max_tokens,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": context}],
+        logger.info(
+            "Generating briefing for %s (%s, %.1fh available)",
+            today, day_of_week, available_hours,
         )
 
-        raw_text = response.content[0].text
+        raw_text = self._run_agent_loop(context)
         briefing_data = self._parse_json_response(raw_text)
 
         tasks = []
@@ -199,12 +327,13 @@ class PlannerAgent:
             "Parse this into structured feedback."
         )
 
-        response = self._client.messages.create(
+        response = self._call_claude(
             model=self.config.llm.model,
             max_tokens=1024,
             system=FEEDBACK_PARSE_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
+        self._log_usage(response, self.config.llm.model)
 
         raw_text = response.content[0].text
         feedback_data = self._parse_json_response(raw_text)
@@ -348,6 +477,12 @@ class PlannerAgent:
             start = text.find("{")
             end = text.rfind("}") + 1
             if start >= 0 and end > start:
-                return json.loads(text[start:end], strict=False)
-            logger.error("Failed to parse JSON from response: %s", text[:200])
-            raise
+                try:
+                    return json.loads(text[start:end], strict=False)
+                except json.JSONDecodeError:
+                    pass
+            logger.error("Failed to parse JSON from response: %s", text[:500])
+            raise BriefingParseError(
+                f"Failed to parse briefing JSON from Claude response. "
+                f"Raw text (first 500 chars): {text[:500]}"
+            ) from None

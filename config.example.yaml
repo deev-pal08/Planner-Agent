@@ -7,7 +7,7 @@ about_me: "AboutMe.md"
 llm:
   model: "claude-haiku-4-5"           # Daily briefing generation (cheap, fast)
   research_model: "claude-sonnet-4-6"  # Research tasks, skill assessment (smarter)
-  max_tokens: 4096
+  max_tokens: 8192
 
 # Email — outbound daily briefing
 email:

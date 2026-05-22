@@ -188,6 +188,12 @@ class StateStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_task_by_id(self, task_id: int) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM tasks WHERE id = ?", (task_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def update_task_status(
         self,
         task_id: int,
@@ -350,6 +356,20 @@ class StateStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def briefing_exists_for_date(self, date: str) -> bool:
+        row = self._conn.execute(
+            "SELECT id FROM daily_briefings WHERE DATE(date) = DATE(?)", (date,),
+        ).fetchone()
+        return row is not None
+
+    def delete_pending_tasks_for_date(self, date: str) -> int:
+        cursor = self._conn.execute(
+            "DELETE FROM tasks WHERE DATE(assigned_date) = DATE(?) AND status = 'pending'",
+            (date,),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
     def get_last_email_message_id(self) -> str | None:
         row = self._conn.execute(
             """SELECT email_message_id FROM daily_briefings
@@ -377,6 +397,22 @@ class StateStore:
              datetime.now(UTC).isoformat(), source),
         )
         self._conn.commit()
+
+    def get_recent_feedback_notes(self, days: int = 14) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT f.notes, f.learnings, f.received_at, t.title, t.track
+               FROM feedback_log f
+               JOIN tasks t ON f.task_id = t.id
+               WHERE f.received_at >= datetime('now', ?)
+               AND (
+                   (f.notes IS NOT NULL AND f.notes != '')
+                   OR (f.learnings IS NOT NULL AND f.learnings != '')
+               )
+               ORDER BY f.received_at DESC
+               LIMIT 20""",
+            (f"-{days} days",),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # --- Meta ---
 
