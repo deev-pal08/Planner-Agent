@@ -161,8 +161,12 @@ Newsletter articles MUST NOT be mixed into the main task list. Instead:
 You have two tools you MUST use:
 
 1. **verify_url** — Before including ANY resource URL in a task, call verify_url to check \
-   if the URL is live and accessible. If a URL returns a non-2xx status or is unreachable, \
-   find an alternative resource or note in the task that the URL may need manual verification.
+   if the URL is live and accessible. The tool returns the actual page title from the HTML. \
+   CRITICAL: You MUST use the returned `page_title` as the task title and resource_name. \
+   Do NOT use titles from your own memory — they are often outdated, wrong, or hallucinated. \
+   If the tool returns no page_title (e.g., non-HTML or failed request), note that the title \
+   could not be verified. If a URL returns a non-2xx status or is unreachable, find an \
+   alternative resource or note in the task that the URL may need manual verification.
 
 2. **search_learnings** — Before assigning a task on a topic, search the user's completed \
    task learnings to check what they have already studied. This prevents assigning material \
@@ -247,12 +251,20 @@ def build_briefing_context(
         done = completion_stats.get("done", 0)
         skipped = completion_stats.get("skipped", 0)
         hours = completion_stats.get("hours_done", 0) or 0
-        rate = (done / total * 100) if total > 0 else 0
-        sections.append(
-            f"## LAST 7 DAYS\n"
-            f"- Tasks: {done}/{total} completed ({rate:.0f}%), {skipped} skipped\n"
-            f"- Hours logged: {hours:.1f}h"
-        )
+        if total == 0:
+            sections.append(
+                "## LAST 7 DAYS\n"
+                "This is the FIRST briefing — no prior tasks have been assigned. "
+                "Do NOT comment on missing completion history or habits."
+            )
+        else:
+            rate = (done / total * 100) if total > 0 else 0
+            sections.append(
+                f"## LAST 7 DAYS\n"
+                f"- Tasks: {done}/{total} completed ({rate:.0f}%), "
+                f"{skipped} skipped\n"
+                f"- Hours logged: {hours:.1f}h"
+            )
 
     # Skipped patterns
     if skipped_patterns:

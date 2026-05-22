@@ -39,8 +39,10 @@ TOOLS = [
     {
         "name": "verify_url",
         "description": (
-            "Check if a resource URL is live and accessible. "
-            "Call this on every resource_url before including it in a task."
+            "Check if a resource URL is live and retrieve the actual page title. "
+            "Call this on every resource_url before including it in a task. "
+            "IMPORTANT: Always use the returned page_title as the task title — "
+            "do NOT use titles from your own memory, as they may be outdated or wrong."
         ),
         "input_schema": {
             "type": "object",
@@ -108,10 +110,17 @@ class PlannerAgent:
 
     def _verify_url(self, url: str) -> dict:
         try:
+            import re
+
             import httpx
 
-            r = httpx.head(url, follow_redirects=True, timeout=5)
-            return {"url": url, "live": r.status_code < 400, "status": r.status_code}
+            r = httpx.get(url, follow_redirects=True, timeout=10)
+            result: dict = {"url": url, "live": r.status_code < 400, "status": r.status_code}
+            if result["live"] and "text/html" in r.headers.get("content-type", ""):
+                match = re.search(r"<title[^>]*>([^<]+)</title>", r.text[:10000], re.IGNORECASE)
+                if match:
+                    result["page_title"] = match.group(1).strip()
+            return result
         except Exception as e:
             return {"url": url, "live": False, "error": str(e)}
 
