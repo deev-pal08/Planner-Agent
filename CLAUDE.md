@@ -68,9 +68,16 @@ uv run ruff check src/                  # lint
 ## Adaptive Loop
 1. `planner daily` reads full state (skills, cumulative stats, learning summary, tasks, achievements, completion stats, skip patterns, feedback notes, newsletter articles) and sends to Claude
 2. Claude runs agent loop — searches past learnings, verifies URLs, generates tasks adapted to current progress and long-term memory
-3. User replies to briefing email with natural language progress update
-4. `planner process-replies` parses the latest reply, shows parsed feedback, prompts for confirmation, updates task statuses and skill hours, then updates the rolling learning summary
-5. Next `planner daily` sees updated state (including the evolved learning summary capturing all historical preferences and insights) and adapts
+3. User completes tasks at their own pace (1-5+ days)
+4. User replies to briefing email with natural language progress update
+5. `planner process-replies` parses the latest reply, shows parsed feedback, prompts for confirmation, updates task statuses and skill hours, then updates the rolling learning summary
+6. Next `planner daily` sees updated state (including the evolved learning summary capturing all historical preferences and insights) and adapts
+
+## Async Workflow
+The planner is designed for flexible, user-driven pacing — not daily cron:
+- **No auto-expiry**: pending tasks stay pending indefinitely until completed or skipped
+- **Count-based context**: completion stats, recent tasks, skip patterns, and feedback notes are all retrieved by count (last N items), not by time window. This prevents data from "falling off" if the user takes multiple days between briefings.
+- **No forced cadence**: same-day dedup prevents accidental double-runs, but any multi-day gap is fine
 
 ## Task Specificity Rule
 The system prompt enforces hyper-specific tasks. Never "Complete 2 SSRF labs" — always exact lab titles, URLs, and rationale for why that specific resource.

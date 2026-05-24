@@ -194,12 +194,12 @@ class PlannerAgent:
         )
 
         skills = self.state.get_all_skills()
-        recent_tasks = self.state.get_recent_completed(days=7)
+        recent_tasks = self.state.get_recent_completed()
         achievements = self.state.get_all_achievements()
         achievement_counts = self.state.get_achievement_counts()
-        completion_stats = self.state.get_completion_stats(days=7)
-        skipped_patterns = self.state.get_skipped_patterns(days=14)
-        feedback_notes = self.state.get_recent_feedback_notes(days=14)
+        completion_stats = self.state.get_completion_stats()
+        skipped_patterns = self.state.get_skipped_patterns()
+        feedback_notes = self.state.get_recent_feedback_notes()
         cumulative_track_stats = self.state.get_cumulative_track_stats()
         learning_summary = self.state.get_meta("learning_summary")
 

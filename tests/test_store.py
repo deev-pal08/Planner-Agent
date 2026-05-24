@@ -46,7 +46,7 @@ def test_task_status_update(tmp_path):
 
     store.update_task_status(task_id, status="done", actual_hours=1.0, learnings="Learned SSRF")
 
-    completed = store.get_recent_completed(days=1)
+    completed = store.get_recent_completed()
     assert len(completed) >= 1
     found = next(t for t in completed if t["id"] == task_id)
     assert found["status"] == "done"
@@ -79,7 +79,7 @@ def test_feedback_notes_retrieved(tmp_path):
         source="email",
     )
 
-    notes = store.get_recent_feedback_notes(days=7)
+    notes = store.get_recent_feedback_notes()
     assert len(notes) >= 1
     assert "Too basic" in notes[0]["notes"]
     assert notes[0]["title"] == "SSRF Lab"

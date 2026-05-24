@@ -218,27 +218,27 @@ class StateStore:
         )
         self._conn.commit()
 
-    def get_recent_completed(self, days: int = 7, limit: int = 50) -> list[dict[str, Any]]:
+    def get_recent_completed(self, limit: int = 15) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             """SELECT * FROM tasks
                WHERE status = 'done'
-               AND completed_date >= datetime('now', ?)
                ORDER BY completed_date DESC LIMIT ?""",
-            (f"-{days} days", limit),
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_completion_stats(self, days: int = 7) -> dict[str, Any]:
+    def get_completion_stats(self, limit: int = 20) -> dict[str, Any]:
         row = self._conn.execute(
             """SELECT
                 COUNT(*) as total,
                 SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done,
                 SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped,
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN status = 'done' THEN COALESCE(actual_hours, estimated_hours) ELSE 0 END) as hours_done
-               FROM tasks
-               WHERE assigned_date >= datetime('now', ?)""",
-            (f"-{days} days",),
+                SUM(CASE WHEN status = 'done'
+                    THEN COALESCE(actual_hours, estimated_hours)
+                    ELSE 0 END) as hours_done
+               FROM (SELECT * FROM tasks ORDER BY assigned_date DESC LIMIT ?)""",
+            (limit,),
         ).fetchone()
         if row is None:
             return {"total": 0, "done": 0, "skipped": 0, "pending": 0, "hours_done": 0}
@@ -257,16 +257,15 @@ class StateStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_skipped_patterns(self, days: int = 14) -> list[dict[str, Any]]:
+    def get_skipped_patterns(self, limit: int = 40) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             """SELECT track, task_type, COUNT(*) as skip_count
-               FROM tasks
+               FROM (SELECT * FROM tasks ORDER BY assigned_date DESC LIMIT ?)
                WHERE status = 'skipped'
-               AND assigned_date >= datetime('now', ?)
                GROUP BY track, task_type
                HAVING skip_count >= 2
                ORDER BY skip_count DESC""",
-            (f"-{days} days",),
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -393,19 +392,18 @@ class StateStore:
         )
         self._conn.commit()
 
-    def get_recent_feedback_notes(self, days: int = 14) -> list[dict[str, Any]]:
+    def get_recent_feedback_notes(self, limit: int = 15) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             """SELECT f.notes, f.learnings, f.received_at, t.title, t.track
                FROM feedback_log f
                JOIN tasks t ON f.task_id = t.id
-               WHERE f.received_at >= datetime('now', ?)
-               AND (
+               WHERE (
                    (f.notes IS NOT NULL AND f.notes != '')
                    OR (f.learnings IS NOT NULL AND f.learnings != '')
                )
                ORDER BY f.received_at DESC
-               LIMIT 20""",
-            (f"-{days} days",),
+               LIMIT ?""",
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 

@@ -2,7 +2,7 @@
 
 SYSTEM_PROMPT = """\
 You are a hyper-specific career planning agent for a Security Engineer at Meta (ProdSec). \
-Your job is to generate tomorrow's task list based on their current state, goals, and progress.
+Your job is to generate the next task list based on their current state, goals, and progress.
 
 ## USER'S GOALS (6-9 month horizon)
 1. Promotion to Principal Security Engineer at FAANG
@@ -323,14 +323,14 @@ def build_briefing_context(
         hours = completion_stats.get("hours_done", 0) or 0
         if total == 0:
             sections.append(
-                "## LAST 7 DAYS\n"
+                "## RECENT COMPLETION STATS\n"
                 "This is the FIRST briefing — no prior tasks have been assigned. "
                 "Do NOT comment on missing completion history or habits."
             )
         else:
             rate = (done / total * 100) if total > 0 else 0
             sections.append(
-                f"## LAST 7 DAYS\n"
+                f"## RECENT COMPLETION STATS (last {total} tasks assigned)\n"
                 f"- Tasks: {done}/{total} completed ({rate:.0f}%), "
                 f"{skipped} skipped\n"
                 f"- Hours logged: {hours:.1f}h"
@@ -338,7 +338,7 @@ def build_briefing_context(
 
     # Skipped patterns
     if skipped_patterns:
-        lines = ["## SKIPPED TASK PATTERNS (last 14 days)"]
+        lines = ["## SKIPPED TASK PATTERNS (recent tasks)"]
         for p in skipped_patterns:
             lines.append(f"- {p['track']} / {p['task_type']}: skipped {p['skip_count']} times")
         sections.append("\n".join(lines))
@@ -436,7 +436,7 @@ def build_briefing_context(
 
     sections.append(
         "## INSTRUCTION\n"
-        "Generate tomorrow's task list. Be HYPER-SPECIFIC about every resource. "
+        "Generate the next task list. Be HYPER-SPECIFIC about every resource. "
         "Name exact labs, exact articles, exact URLs. "
         "Explain WHY each task was chosen based on the current state above. "
         f"Total hours MUST equal {available_hours}."
