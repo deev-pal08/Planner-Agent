@@ -81,7 +81,7 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
                     from_address=config.email.from_address,
                     to_addresses=config.email.to_addresses,
                 )
-                stats = state.get_completion_stats(days=7)
+                stats = state.get_completion_stats()
                 last = state.get_last_briefing()
                 last_date = last["date"][:10] if last else "never"
                 total = stats.get("total", 0)
@@ -94,7 +94,7 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
                     f"Briefing generation failed for {today}.\n\n"
                     f"Error: {e}\n\n"
                     f"Last briefing: {last_date}\n"
-                    f"Last 7 days: {done}/{total} tasks ({rate:.0f}%)\n"
+                    f"Recent: {done}/{total} tasks ({rate:.0f}%)\n"
                     f"Active tracks: {tracks}\n\n"
                     f"Check logs for details. Run `planner daily` to retry."
                 )
@@ -279,12 +279,12 @@ def status(ctx: click.Context) -> None:
         click.echo("  Last briefing: never (run `planner init` first)")
 
     # Completion stats
-    stats = state.get_completion_stats(days=7)
-    total = stats.get("total", 0)
-    done = stats.get("done", 0)
+    stats = state.get_completion_stats()
+    total = stats.get("total", 0) or 0
+    done = stats.get("done", 0) or 0
     hours = stats.get("hours_done", 0) or 0
     rate = (done / total * 100) if total > 0 else 0
-    click.echo(f"\n  Last 7 days: {done}/{total} tasks ({rate:.0f}%), {hours:.1f}h logged")
+    click.echo(f"\n  Recent: {done}/{total} tasks ({rate:.0f}%), {hours:.1f}h logged")
 
     # Skill tracks
     skills = state.get_all_skills()
@@ -312,9 +312,9 @@ def status(ctx: click.Context) -> None:
         click.echo("\n  Portfolio: empty (use `planner log-achievement` to add)")
 
     # Skipped patterns
-    skipped = state.get_skipped_patterns(days=14)
+    skipped = state.get_skipped_patterns()
     if skipped:
-        click.echo(click.style("\n  Skipping patterns (last 14 days):", fg="yellow"))
+        click.echo(click.style("\n  Skipping patterns (recent tasks):", fg="yellow"))
         for p in skipped:
             click.echo(
                 click.style(
@@ -463,22 +463,22 @@ def install_schedule_cmd(ctx: click.Context, time_str: str | None, uninstall: bo
 
 
 @cli.command()
-@click.option("--days", "-d", type=int, default=7, help="Number of days to show")
+@click.option("--limit", "-l", type=int, default=15, help="Number of tasks to show")
 @click.pass_context
-def history(ctx: click.Context, days: int) -> None:
+def history(ctx: click.Context, limit: int) -> None:
     """Show recent task history."""
     config = ctx.obj["config"]
 
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
-    tasks = state.get_recent_completed(days=days)
+    tasks = state.get_recent_completed(limit=limit)
 
     if not tasks:
         click.echo("No completed tasks found.")
         return
 
-    click.echo(f"\nCompleted tasks (last {days} days):")
+    click.echo(f"\nCompleted tasks (last {limit}):")
     click.echo("-" * 60)
 
     for t in tasks:
