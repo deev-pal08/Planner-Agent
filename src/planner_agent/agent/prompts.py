@@ -104,6 +104,8 @@ research, etc.). Newsletter articles go ONLY in "newsletter_reading". \
 - Tasks MUST sum to the available hours (no slack, no overrun)
 - Include 1 portfolio gap alert if any track has 0 achievements
 - If the user has been skipping a task type repeatedly, note it in skill_observations
+- skill_observations that reference a specific event, resource, or deadline MUST include the URL \
+(e.g., "Register at https://reddit.com/r/netsec/comments/..." not just "Register at the Reddit thread")
 - newsletter_topics: ONLY populate when the newsletter DB genuinely lacks coverage \
 for a needed topic. Include exact search terms the user should run. \
 Format: "Run newsletter agent with: '<search terms>'"
