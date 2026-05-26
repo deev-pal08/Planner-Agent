@@ -529,6 +529,8 @@ def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -
             click.echo(f"    Notes: {notes_str}")
     if feedback.general_notes:
         click.echo(f"\n  General notes: {feedback.general_notes}")
+    if feedback.total_hours_reported:
+        click.echo(f"  Total hours reported: {feedback.total_hours_reported}h")
     click.echo("-" * 50)
 
     if not auto_confirm and not click.confirm("Apply these updates to the database?"):
