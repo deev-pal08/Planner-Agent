@@ -270,14 +270,20 @@ class StateStore:
         return [dict(r) for r in rows]
 
     def get_consumed_article_urls(self) -> set[str]:
-        """Return all resource_urls from completed tasks — these are 'already read'."""
+        """Return all URLs from completed tasks — resource_url plus any URLs in description."""
+        import re
+
+        urls: set[str] = set()
         rows = self._conn.execute(
-            """SELECT DISTINCT resource_url FROM tasks
-               WHERE status = 'done'
-               AND resource_url != ''
-               AND resource_url IS NOT NULL""",
+            """SELECT resource_url, description FROM tasks
+               WHERE status = 'done'""",
         ).fetchall()
-        return {r["resource_url"] for r in rows}
+        for r in rows:
+            if r["resource_url"]:
+                urls.add(r["resource_url"])
+            if r["description"]:
+                urls.update(re.findall(r"https?://\S+", r["description"]))
+        return urls
 
     # --- Achievements ---
 

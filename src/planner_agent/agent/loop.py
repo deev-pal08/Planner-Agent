@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 
 import anthropic
@@ -127,21 +128,30 @@ class PlannerAgent:
 
     def _search_learnings(self, query: str) -> list[dict]:
         rows = self.state._conn.execute(
-            """SELECT title, learnings, track, completed_date
+            """SELECT title, learnings, track, completed_date, description, resource_url
                FROM tasks
                WHERE status = 'done'
-               AND (learnings LIKE ? OR title LIKE ?)
-               ORDER BY completed_date DESC LIMIT 5""",
-            (f"%{query}%", f"%{query}%"),
+               AND (learnings LIKE ? OR title LIKE ? OR description LIKE ? OR resource_url LIKE ?)
+               ORDER BY completed_date DESC LIMIT 10""",
+            (f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%"),
         ).fetchall()
         return [dict(r) for r in rows]
 
     def _run_agent_loop(self, context: str) -> str:
         messages: list[dict] = [{"role": "user", "content": context}]
         max_iterations = 10
+        _api_call_interval = 15
 
         response = None
+        _last_call = 0.0
         for _ in range(max_iterations):
+            elapsed = time.monotonic() - _last_call
+            if _last_call and elapsed < _api_call_interval:
+                wait = _api_call_interval - elapsed
+                logger.info("Pacing: waiting %.0fs before next API call", wait)
+                time.sleep(wait)
+
+            _last_call = time.monotonic()
             response = self._call_claude(
                 model=self.config.llm.research_model,
                 max_tokens=self.config.llm.max_tokens,
