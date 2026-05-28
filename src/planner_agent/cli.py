@@ -491,7 +491,7 @@ def history(ctx: click.Context, limit: int) -> None:
 # --- Internal helpers ---
 
 def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -> int:
-    """Process the most recent email reply and update task statuses."""
+    """Process email replies and update task statuses."""
     last_briefing = state.get_last_briefing()
     if not last_briefing:
         click.echo("No briefing found — generate one first with `planner daily`.")
@@ -510,8 +510,10 @@ def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -
 
     reply = replies[-1]
 
+    combined_body = "\n\n---\n\n".join(r["body"] for r in replies)
+
     briefing_tasks = json.loads(last_briefing.get("tasks_json", "[]"))
-    feedback = agent.parse_feedback(reply["body"], briefing_tasks)
+    feedback = agent.parse_feedback(combined_body, briefing_tasks)
 
     # Issue 1: Show parsed feedback and ask for confirmation
     click.echo("\nParsed feedback from email reply:")
