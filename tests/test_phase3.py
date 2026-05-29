@@ -316,7 +316,7 @@ def test_render_directive_banner_with_directive():
     directive = _sample_directive()
     html = _render_directive_banner(directive)
 
-    assert "Weekly Directive" in html
+    assert "WEEKLY DIRECTIVE" in html
     assert "LLM Attack Surface Week" in html
     assert "Build AI security foundation" in html
     assert "Ai Security" in html
@@ -343,9 +343,9 @@ def test_render_briefing_html_with_directive():
 
     html = render_briefing_html(briefing, directive=directive)
 
-    assert "DAILY BRIEFING" in html
-    assert "2026-05-28" in html
-    assert "Weekly Directive" in html
+    assert "PLANNER AGENT" in html
+    assert "May 28" in html
+    assert "WEEKLY DIRECTIVE" in html
     assert "LLM Attack Surface Week" in html
     assert "Read OWASP Top 10 for LLMs" in html
 
@@ -354,9 +354,9 @@ def test_render_briefing_html_without_directive():
     briefing = _sample_briefing()
     html = render_briefing_html(briefing)
 
-    assert "DAILY BRIEFING" in html
-    assert "2026-05-28" in html
-    assert "Weekly Directive" not in html
+    assert "PLANNER AGENT" in html
+    assert "May 28" in html
+    assert "WEEKLY DIRECTIVE" not in html
     assert "Read OWASP Top 10 for LLMs" in html
 
 

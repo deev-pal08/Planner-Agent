@@ -21,9 +21,16 @@ class EmailSender:
         self.to_addresses = to_addresses
         self.reply_to = reply_to or (to_addresses[0] if to_addresses else "")
 
-    def send_briefing(self, briefing: DailyBriefing, directive: dict | None = None) -> str:
+    def send_briefing(
+        self,
+        briefing: DailyBriefing,
+        directive: dict | None = None,
+        opportunities: list[dict] | None = None,
+    ) -> str:
         """Send the daily briefing email. Returns the Resend message ID."""
-        html = render_briefing_html(briefing, directive=directive)
+        html = render_briefing_html(
+            briefing, directive=directive, opportunities=opportunities,
+        )
         phase = briefing.focus_phase.upper()
         subject = (
             f"[Planner] {briefing.date} — "

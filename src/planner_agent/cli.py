@@ -118,7 +118,12 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
                 from_address=config.email.from_address,
                 to_addresses=config.email.to_addresses,
             )
-            message_id = sender.send_briefing(briefing, directive=orchestrator.last_directive)
+            opportunities = state.get_all_opportunities()
+            message_id = sender.send_briefing(
+                briefing,
+                directive=orchestrator.last_directive,
+                opportunities=opportunities,
+            )
 
             last_briefing = state.get_last_briefing()
             if last_briefing:

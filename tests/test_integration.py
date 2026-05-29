@@ -182,8 +182,9 @@ TACTICIAN_RESPONSE = json.dumps({
 })
 
 
+@patch("time.sleep")
 @patch("planner_agent.agent.base.anthropic.Anthropic")
-def test_full_daily_cycle_all_brains(mock_anthropic_cls, tmp_path):
+def test_full_daily_cycle_all_brains(mock_anthropic_cls, _mock_sleep, tmp_path):
     """End-to-end: Scout → Analyst bootstrap → Critic → Strategist → Tactician."""
     store = _make_store(tmp_path)
     config = _make_config()
@@ -259,8 +260,9 @@ def test_full_daily_cycle_all_brains(mock_anthropic_cls, tmp_path):
     assert critic_tokens is not None
 
 
+@patch("time.sleep")
 @patch("planner_agent.agent.base.anthropic.Anthropic")
-def test_daily_cycle_minimal_no_prior_data(mock_anthropic_cls, tmp_path):
+def test_daily_cycle_minimal_no_prior_data(mock_anthropic_cls, _mock_sleep, tmp_path):
     """First ever run: no tasks, no goals — triggers Strategist bootstrap only."""
     store = _make_store(tmp_path)
     config = _make_config()
@@ -341,8 +343,9 @@ def test_daily_cycle_minimal_no_prior_data(mock_anthropic_cls, tmp_path):
     assert briefing.focus_track == "ai_security"
 
 
+@patch("time.sleep")
 @patch("planner_agent.agent.base.anthropic.Anthropic")
-def test_cost_tracking_accumulates(mock_anthropic_cls, tmp_path):
+def test_cost_tracking_accumulates(mock_anthropic_cls, _mock_sleep, tmp_path):
     """Verify token counts accumulate across multiple API calls."""
     store = _make_store(tmp_path)
     config = _make_config()

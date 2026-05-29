@@ -328,6 +328,7 @@ class ScoutBrain(BaseBrain):
                 tracks=o.get("tracks", []),
                 priority=priority,
                 notes=o.get("notes", ""),
+                location=o.get("location", ""),
                 source="scout",
             )
 

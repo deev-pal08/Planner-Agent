@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS opportunities (
     status TEXT NOT NULL DEFAULT 'discovered',
     priority TEXT NOT NULL DEFAULT 'medium',
     notes TEXT DEFAULT '',
+    location TEXT DEFAULT '',
     source TEXT DEFAULT '',
     discovered_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
@@ -204,6 +205,7 @@ _V3_ALTER_COLUMNS = [
     "ALTER TABLE skills ADD COLUMN competence_level TEXT DEFAULT 'novice'",
     "ALTER TABLE skills ADD COLUMN sub_skills_json TEXT DEFAULT '{}'",
     "ALTER TABLE daily_briefings ADD COLUMN directive_id INTEGER",
+    "ALTER TABLE opportunities ADD COLUMN location TEXT DEFAULT ''",
 ]
 
 _V3_ALTER_INDEXES = [
@@ -875,13 +877,13 @@ class StateStore:
             """INSERT INTO opportunities
                (title, description, opportunity_type, url, deadline,
                 event_start, event_end, tracks, status, priority,
-                notes, source, discovered_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                notes, location, source, discovered_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 opp.title, opp.description, opp.opportunity_type, opp.url,
                 opp.deadline, opp.event_start, opp.event_end,
                 json.dumps(opp.tracks), opp.status, opp.priority,
-                opp.notes, opp.source, now, now,
+                opp.notes, opp.location, opp.source, now, now,
             ),
         )
         self._conn.commit()

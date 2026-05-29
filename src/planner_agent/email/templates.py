@@ -6,14 +6,14 @@ from planner_agent.models import DailyBriefing, Phase
 
 PHASE_LABELS = {
     Phase.LEARN: ("LEARN", "#6366f1", "#eef2ff"),
-    Phase.PRACTICE: ("PRACTICE", "#d97706", "#fffbeb"),
-    Phase.PRODUCE: ("PRODUCE", "#059669", "#ecfdf5"),
+    Phase.PRACTICE: ("PRACTICE", "#f59e0b", "#fffbeb"),
+    Phase.PRODUCE: ("PRODUCE", "#10b981", "#ecfdf5"),
 }
 
 PRIORITY_STYLES = {
-    "critical": ("#dc2626", "#fef2f2", "#991b1b"),
-    "high": ("#ea580c", "#fff7ed", "#9a3412"),
-    "medium": ("#2563eb", "#eff6ff", "#1e40af"),
+    "critical": ("#ef4444", "#fef2f2", "#991b1b"),
+    "high": ("#f97316", "#fff7ed", "#9a3412"),
+    "medium": ("#3b82f6", "#eff6ff", "#1e40af"),
     "low": ("#6b7280", "#f9fafb", "#374151"),
 }
 
@@ -34,8 +34,9 @@ TASK_TYPE_ICONS = {
 def render_briefing_html(
     briefing: DailyBriefing,
     directive: dict | None = None,
+    opportunities: list[dict] | None = None,
 ) -> str:
-    phase_label, phase_color, phase_bg = PHASE_LABELS.get(
+    phase_label, phase_color, _phase_bg = PHASE_LABELS.get(
         briefing.focus_phase, ("LEARN", "#6366f1", "#eef2ff")
     )
 
@@ -45,6 +46,20 @@ def render_briefing_html(
     observations_html = _render_observations(briefing)
     newsletter_html = _render_newsletter(briefing)
     directive_html = _render_directive_banner(directive)
+    opportunities_html = _render_opportunities(
+        opportunities or [], briefing.date
+    )
+
+    from datetime import datetime
+    try:
+        date_obj = datetime.fromisoformat(briefing.date)
+        formatted_date = date_obj.strftime("%A, %B %-d")
+        short_date = date_obj.strftime("%b %-d, %Y")
+    except ValueError:
+        formatted_date = briefing.date
+        short_date = briefing.date
+
+    focus_display = briefing.focus_track.replace("_", " ").title()
 
     return f"""\
 <!DOCTYPE html>
@@ -53,51 +68,75 @@ def render_briefing_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin:0;padding:0;background-color:#f1f5f9;
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+<body style="margin:0;padding:0;background-color:#0f0f14;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',\
+Roboto,'Helvetica Neue',Arial,sans-serif;
   -webkit-font-smoothing:antialiased;">
 
-<!-- Wrapper -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f1f5f9;">
-<tr><td align="center" style="padding:32px 16px;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background-color:#0f0f14;">
+<tr><td align="center" style="padding:40px 16px;">
 
 <!-- Main Container -->
-<table width="600" cellpadding="0" cellspacing="0" border="0"
-       style="background-color:#ffffff;border-radius:16px;overflow:hidden;
-              box-shadow:0 4px 6px -1px rgba(0,0,0,0.07),0 2px 4px -2px rgba(0,0,0,0.05);">
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="background-color:#1a1a24;border-radius:20px;overflow:hidden;
+              border:1px solid rgba(255,255,255,0.06);">
 
   <!-- Header -->
-  <tr><td style="background-color:#0f172a;padding:0;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-      <tr><td style="padding:32px 32px 16px 32px;">
+  <tr><td style="padding:0;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,\
+#3730a3 100%);">
+      <tr><td style="padding:40px 40px 12px 40px;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td style="font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px;">
-              DAILY BRIEFING
+            <td>
+              <p style="margin:0;font-size:11px;font-weight:700;\
+color:rgba(255,255,255,0.4);text-transform:uppercase;\
+letter-spacing:2.5px;">
+                PLANNER AGENT
+              </p>
             </td>
-            <td align="right" style="font-size:13px;color:#64748b;">
-              {briefing.total_estimated_hours}h planned
+            <td align="right">
+              <span style="display:inline-block;background-color:\
+rgba(255,255,255,0.1);backdrop-filter:blur(8px);\
+color:rgba(255,255,255,0.7);font-size:12px;\
+font-weight:600;padding:6px 14px;border-radius:20px;\
+border:1px solid rgba(255,255,255,0.1);">
+                {briefing.total_estimated_hours}h planned
+              </span>
             </td>
           </tr>
         </table>
       </td></tr>
-      <tr><td style="padding:0 32px 8px 32px;">
-        <span style="font-size:28px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">
-          {briefing.date}
-        </span>
+      <tr><td style="padding:16px 40px 6px 40px;">
+        <p style="margin:0;font-size:32px;font-weight:800;\
+color:#ffffff;letter-spacing:-1px;line-height:1.1;">
+          {formatted_date}
+        </p>
       </td></tr>
-      <tr><td style="padding:0 32px 28px 32px;">
+      <tr><td style="padding:4px 40px 0 40px;">
+        <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.4);\
+font-weight:400;">
+          {short_date}
+        </p>
+      </td></tr>
+      <tr><td style="padding:20px 40px 36px 40px;">
         <table cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td style="padding-right:12px;">
-              <span style="display:inline-block;background-color:{phase_color};color:#ffffff;
-                           font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;
-                           letter-spacing:0.5px;">
+            <td style="padding-right:10px;">
+              <span style="display:inline-block;background-color:\
+{phase_color};color:#ffffff;font-size:11px;\
+font-weight:700;padding:5px 14px;border-radius:6px;\
+letter-spacing:1px;">
                 {phase_label}
               </span>
             </td>
-            <td style="font-size:14px;color:#cbd5e1;">
-              {briefing.focus_track.replace('_', ' ').title()}
+            <td>
+              <span style="font-size:15px;color:rgba(255,255,255,0.85);\
+font-weight:600;">
+                {focus_display}
+              </span>
             </td>
           </tr>
         </table>
@@ -106,8 +145,10 @@ def render_briefing_html(
   </td></tr>
 
   <!-- Rationale -->
-  <tr><td style="padding:20px 32px;background-color:#f8fafc;border-bottom:1px solid #e2e8f0;">
-    <p style="margin:0;font-size:14px;line-height:1.6;color:#475569;">
+  <tr><td style="padding:28px 40px 24px 40px;\
+border-bottom:1px solid rgba(255,255,255,0.06);">
+    <p style="margin:0;font-size:14px;line-height:1.7;\
+color:rgba(255,255,255,0.55);font-weight:400;">
       {briefing.focus_rationale}
     </p>
   </td></tr>
@@ -115,53 +156,69 @@ def render_briefing_html(
   <!-- Directive Banner -->
   {directive_html}
 
-  <!-- Tasks Header -->
-  <tr><td style="padding:24px 32px 12px 32px;">
+  <!-- Tasks Section -->
+  <tr><td style="padding:28px 40px 16px 40px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0">
       <tr>
-        <td style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px;">
-          TODAY'S TASKS
+        <td>
+          <p style="margin:0;font-size:11px;font-weight:700;\
+color:rgba(255,255,255,0.3);text-transform:uppercase;\
+letter-spacing:2px;">
+            TODAY&rsquo;S TASKS
+          </p>
         </td>
-        <td align="right" style="font-size:12px;color:#94a3b8;">
-          {len(briefing.tasks)} tasks
+        <td align="right">
+          <span style="font-size:12px;color:rgba(255,255,255,0.25);\
+font-weight:500;">
+            {len(briefing.tasks)} tasks
+          </span>
         </td>
       </tr>
     </table>
   </td></tr>
 
-  <!-- Tasks -->
+  <!-- Task Cards -->
   {tasks_html}
 
   <!-- Newsletter Reading -->
   {newsletter_reading_html}
 
-  <!-- Spacer -->
-  <tr><td style="padding:8px;"></td></tr>
+  <!-- Bottom Spacer -->
+  <tr><td style="padding:12px;"></td></tr>
 
 </table>
 
 {gaps_html}
 {observations_html}
+{opportunities_html}
 {newsletter_html}
 
 <!-- Reply CTA -->
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
-  <tr><td style="padding:20px 32px;background-color:#ffffff;border-radius:12px;
-                 border:2px dashed #d1d5db;text-align:center;">
-    <p style="margin:0 0 6px 0;font-size:15px;color:#1f2937;font-weight:600;">
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="margin-top:20px;">
+  <tr><td style="padding:24px 36px;background-color:#1a1a24;\
+border-radius:16px;border:1px dashed rgba(255,255,255,0.12);\
+text-align:center;">
+    <p style="margin:0 0 6px 0;font-size:15px;\
+color:rgba(255,255,255,0.8);font-weight:600;">
       ✉️ Reply to update your progress
     </p>
-    <p style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5;">
-      Just reply naturally: "Done 1 and 2. Skipped 3 — too tired. Spent 3 hours total."
+    <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.3);\
+line-height:1.5;">
+      &ldquo;Done 1 and 2. Skipped 3 &mdash; too tired. \
+Spent 3 hours total.&rdquo;
     </p>
   </td></tr>
 </table>
 
 <!-- Footer -->
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
-  <tr><td align="center" style="padding:12px;">
-    <p style="margin:0;font-size:11px;color:#94a3b8;">
-      Planner Agent &middot; Adaptive Daily Task Orchestrator
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="margin-top:20px;">
+  <tr><td align="center" style="padding:16px;">
+    <p style="margin:0;font-size:11px;\
+color:rgba(255,255,255,0.15);font-weight:400;\
+letter-spacing:0.5px;">
+      Planner Agent &middot; Adaptive Career Orchestrator
     </p>
   </td></tr>
 </table>
@@ -176,7 +233,7 @@ def render_briefing_html(
 def _render_tasks(briefing: DailyBriefing) -> str:
     html = ""
     for i, task in enumerate(briefing.tasks, 1):
-        color, bg, text_color = PRIORITY_STYLES.get(
+        color, _bg, _text_color = PRIORITY_STYLES.get(
             task.priority, ("#6b7280", "#f9fafb", "#374151")
         )
         icon = TASK_TYPE_ICONS.get(task.task_type, "⭐")
@@ -187,12 +244,15 @@ def _render_tasks(briefing: DailyBriefing) -> str:
             if len(name) > 70:
                 name = name[:67] + "..."
             resource_html = f"""
-            <tr><td style="padding:8px 0 0 0;">
+            <tr><td style="padding:12px 0 0 0;">
               <table cellpadding="0" cellspacing="0" border="0"
-                     style="background-color:#f8fafc;border-radius:8px;width:100%;">
-                <tr><td style="padding:10px 14px;">
+                     style="background-color:rgba(59,130,246,0.08);\
+border-radius:10px;width:100%;border:1px solid \
+rgba(59,130,246,0.15);">
+                <tr><td style="padding:12px 16px;">
                   <a href="{task.resource_url}"
-                     style="color:#2563eb;font-size:13px;font-weight:500;text-decoration:none;">
+                     style="color:#60a5fa;font-size:13px;\
+font-weight:500;text-decoration:none;">
                     \U0001f517 {name}
                   </a>
                 </td></tr>
@@ -202,50 +262,67 @@ def _render_tasks(briefing: DailyBriefing) -> str:
         why_html = ""
         if task.why:
             why_html = f"""
-            <tr><td style="padding:8px 0 0 0;">
-              <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;font-style:italic;">
-                \U0001f4a1 {task.why}
+            <tr><td style="padding:10px 0 0 0;">
+              <p style="margin:0;font-size:12px;\
+color:rgba(255,255,255,0.3);line-height:1.6;\
+font-style:italic;padding-left:12px;\
+border-left:2px solid rgba(255,255,255,0.08);">
+                {task.why}
               </p>
             </td></tr>"""
 
         html += f"""
-  <tr><td style="padding:4px 32px;">
+  <tr><td style="padding:6px 40px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
-           style="background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;
-                  border-left:4px solid {color};">
-      <tr><td style="padding:20px;">
+           style="background-color:rgba(255,255,255,0.03);\
+border:1px solid rgba(255,255,255,0.06);border-radius:14px;\
+border-left:3px solid {color};">
+      <tr><td style="padding:22px 24px;">
 
-        <!-- Task Number + Priority -->
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td width="40" valign="top">
-              <div style="width:32px;height:32px;border-radius:8px;background-color:{bg};
-                          color:{text_color};font-size:15px;font-weight:800;line-height:32px;
-                          text-align:center;">
+            <td width="44" valign="top">
+              <div style="width:36px;height:36px;border-radius:10px;\
+background-color:rgba(255,255,255,0.05);\
+color:rgba(255,255,255,0.5);font-size:16px;\
+font-weight:800;line-height:36px;text-align:center;\
+border:1px solid rgba(255,255,255,0.08);">
                 {i}
               </div>
             </td>
-            <td style="padding-left:8px;" valign="top">
-              <p style="margin:0 0 2px 0;font-size:15px;font-weight:700;color:#111827;line-height:1.4;">
+            <td style="padding-left:10px;" valign="top">
+              <p style="margin:0 0 6px 0;font-size:15px;font-weight:700;\
+color:rgba(255,255,255,0.9);line-height:1.4;">
                 {task.title}
               </p>
               <table cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="padding-right:6px;">
-                    <span style="display:inline-block;background-color:{bg};color:{text_color};
-                                 font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;
-                                 text-transform:uppercase;letter-spacing:0.5px;">
+                  <td style="padding-right:8px;">
+                    <span style="display:inline-block;\
+background-color:{color};color:#ffffff;\
+font-size:10px;font-weight:700;padding:3px 10px;\
+border-radius:5px;text-transform:uppercase;\
+letter-spacing:0.5px;">
                       {task.priority.upper()}
                     </span>
                   </td>
-                  <td style="padding-right:6px;">
-                    <span style="font-size:12px;color:#6b7280;">{icon} {task.task_type.replace('_', ' ').title()}</span>
+                  <td style="padding-right:8px;">
+                    <span style="font-size:12px;\
+color:rgba(255,255,255,0.35);">
+                      {icon} {task.task_type.replace('_', ' ').title()}
+                    </span>
                   </td>
-                  <td style="padding-right:6px;">
-                    <span style="font-size:12px;color:#6b7280;">⏱ {task.estimated_hours}h</span>
+                  <td style="padding-right:8px;">
+                    <span style="font-size:12px;\
+color:rgba(255,255,255,0.35);">
+                      ⏱ {task.estimated_hours}h
+                    </span>
                   </td>
                   <td>
-                    <span style="font-size:12px;color:#6b7280;">{task.track.replace('_', ' ').title()}</span>
+                    <span style="font-size:12px;\
+color:rgba(255,255,255,0.25);">
+                      {task.track.replace('_', ' ').title()}
+                    </span>
                   </td>
                 </tr>
               </table>
@@ -253,10 +330,11 @@ def _render_tasks(briefing: DailyBriefing) -> str:
           </tr>
         </table>
 
-        <!-- Description -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0" style="margin-top:14px;">
           <tr><td>
-            <p style="margin:0;font-size:13px;color:#4b5563;line-height:1.65;">
+            <p style="margin:0;font-size:13px;\
+color:rgba(255,255,255,0.45);line-height:1.7;">
               {task.description}
             </p>
           </td></tr>
@@ -279,34 +357,51 @@ def _render_newsletter_reading(briefing: DailyBriefing) -> str:
     task_num = len(briefing.tasks) + 1
 
     priority_colors = {
-        "CRITICAL": ("#dc2626", "#fef2f2"),
-        "IMPORTANT": ("#ea580c", "#fff7ed"),
-        "INTERESTING": ("#2563eb", "#eff6ff"),
-        "REFERENCE": ("#6b7280", "#f9fafb"),
+        "CRITICAL": "#ef4444",
+        "IMPORTANT": "#f97316",
+        "INTERESTING": "#3b82f6",
+        "REFERENCE": "#6b7280",
     }
 
     articles_html = ""
     for article in nr.articles:
-        color, bg = priority_colors.get(article.priority, ("#6b7280", "#f9fafb"))
+        color = priority_colors.get(article.priority, "#6b7280")
         why_html = ""
         if article.why:
-            why_html = f"""
-                  <p style="margin:6px 0 0 0;font-size:12px;color:#6b7280;line-height:1.5;font-style:italic;">
-                    {article.why}
-                  </p>"""
+            why_html = (
+                f'<p style="margin:6px 0 0 0;font-size:12px;'
+                f"color:rgba(255,255,255,0.3);line-height:1.5;"
+                f'font-style:italic;">'
+                f"{article.why}</p>"
+            )
 
         articles_html += f"""
             <tr><td style="padding:5px 0;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0"
-                     style="background-color:#fafafa;border-radius:8px;border:1px solid #e5e7eb;">
-                <tr><td style="padding:12px 14px;">
-                  <span style="display:inline-block;background-color:{bg};color:{color};
-                               font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;
-                               text-transform:uppercase;letter-spacing:0.5px;">
-                    {article.priority}
-                  </span>
-                  <p style="margin:8px 0 0 0;font-size:13px;line-height:1.4;">
-                    <a href="{article.url}" style="color:#1e40af;font-weight:600;text-decoration:none;">
+              <table width="100%" cellpadding="0" cellspacing="0"
+                     border="0"
+                     style="background-color:rgba(255,255,255,0.02);\
+border-radius:10px;border:1px solid rgba(255,255,255,0.06);">
+                <tr><td style="padding:14px 16px;">
+                  <table width="100%" cellpadding="0" cellspacing="0"
+                         border="0">
+                    <tr>
+                      <td>
+                        <span style="display:inline-block;\
+background-color:{color};\
+color:#ffffff;font-size:9px;font-weight:700;\
+padding:3px 8px;border-radius:4px;\
+text-transform:uppercase;\
+letter-spacing:0.5px;">
+                          {article.priority}
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                  <p style="margin:8px 0 0 0;font-size:13px;\
+line-height:1.4;">
+                    <a href="{article.url}"
+                       style="color:#818cf8;font-weight:600;\
+text-decoration:none;">
                       {article.title}
                     </a>
                   </p>{why_html}
@@ -315,37 +410,55 @@ def _render_newsletter_reading(briefing: DailyBriefing) -> str:
             </td></tr>"""
 
     return f"""
-  <tr><td style="padding:12px 32px 4px 32px;">
+  <tr><td style="padding:12px 40px 6px 40px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
-           style="background-color:#ffffff;border:1px solid #c4b5fd;border-radius:12px;
-                  border-left:4px solid #7c3aed;">
-      <tr><td style="padding:20px;">
+           style="background-color:rgba(139,92,246,0.06);\
+border:1px solid rgba(139,92,246,0.15);\
+border-radius:14px;border-left:3px solid #8b5cf6;">
+      <tr><td style="padding:22px 24px;">
 
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0">
           <tr>
-            <td width="40" valign="top">
-              <div style="width:32px;height:32px;border-radius:8px;background-color:#f5f3ff;
-                          color:#5b21b6;font-size:15px;font-weight:800;line-height:32px;
-                          text-align:center;">
+            <td width="44" valign="top">
+              <div style="width:36px;height:36px;border-radius:10px;\
+background-color:rgba(139,92,246,0.12);\
+color:#a78bfa;font-size:16px;\
+font-weight:800;line-height:36px;\
+text-align:center;border:1px solid \
+rgba(139,92,246,0.2);">
                 {task_num}
               </div>
             </td>
-            <td style="padding-left:8px;" valign="top">
-              <p style="margin:0 0 2px 0;font-size:15px;font-weight:700;color:#111827;line-height:1.4;">
+            <td style="padding-left:10px;" valign="top">
+              <p style="margin:0 0 6px 0;font-size:15px;\
+font-weight:700;color:rgba(255,255,255,0.9);\
+line-height:1.4;">
                 {nr.title}
               </p>
               <table cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="padding-right:6px;">
-                    <span style="display:inline-block;background-color:#f5f3ff;color:#5b21b6;
-                                 font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;
-                                 text-transform:uppercase;letter-spacing:0.5px;">NEWSLETTER</span>
+                  <td style="padding-right:8px;">
+                    <span style="display:inline-block;\
+background-color:#8b5cf6;color:#ffffff;\
+font-size:10px;font-weight:700;\
+padding:3px 10px;border-radius:5px;\
+text-transform:uppercase;\
+letter-spacing:0.5px;">
+                      NEWSLETTER
+                    </span>
                   </td>
-                  <td style="padding-right:6px;">
-                    <span style="font-size:12px;color:#6b7280;">\U0001f4f0 {len(nr.articles)} articles</span>
+                  <td style="padding-right:8px;">
+                    <span style="font-size:12px;\
+color:rgba(255,255,255,0.35);">
+                      \U0001f4f0 {len(nr.articles)} articles
+                    </span>
                   </td>
                   <td>
-                    <span style="font-size:12px;color:#6b7280;">⏱ {nr.estimated_hours}h</span>
+                    <span style="font-size:12px;\
+color:rgba(255,255,255,0.35);">
+                      ⏱ {nr.estimated_hours}h
+                    </span>
                   </td>
                 </tr>
               </table>
@@ -353,9 +466,11 @@ def _render_newsletter_reading(briefing: DailyBriefing) -> str:
           </tr>
         </table>
 
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0" style="margin-top:14px;">
           <tr><td>
-            <p style="margin:0 0 10px 0;font-size:13px;color:#4b5563;line-height:1.65;">
+            <p style="margin:0 0 12px 0;font-size:13px;\
+color:rgba(255,255,255,0.45);line-height:1.7;">
               {nr.description}
             </p>
           </td></tr>
@@ -377,24 +492,36 @@ def _render_gaps(briefing: DailyBriefing) -> str:
         <tr><td style="padding:6px 0;">
           <table cellpadding="0" cellspacing="0" border="0">
             <tr>
-              <td width="20" valign="top" style="font-size:13px;color:#dc2626;">⚠</td>
-              <td style="font-size:13px;color:#7f1d1d;line-height:1.5;">{gap}</td>
+              <td width="24" valign="top"
+                  style="font-size:14px;color:#ef4444;">
+                ⚠
+              </td>
+              <td style="font-size:13px;\
+color:rgba(255,255,255,0.55);line-height:1.6;">
+                {gap}
+              </td>
             </tr>
           </table>
         </td></tr>"""
 
     return f"""
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
-  <tr><td style="background-color:#ffffff;border-radius:12px;overflow:hidden;
-                 border:1px solid #fecaca;">
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="margin-top:20px;">
+  <tr><td style="background-color:#1a1a24;border-radius:16px;\
+overflow:hidden;border:1px solid rgba(239,68,68,0.2);">
     <table width="100%" cellpadding="0" cellspacing="0" border="0">
-      <tr><td style="padding:16px 24px 8px 24px;background-color:#fef2f2;border-bottom:1px solid #fecaca;">
-        <p style="margin:0;font-size:11px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:1.5px;">
-          \U0001f6a8 Portfolio Gaps
+      <tr><td style="padding:18px 28px 10px 28px;\
+background-color:rgba(239,68,68,0.06);\
+border-bottom:1px solid rgba(239,68,68,0.12);">
+        <p style="margin:0;font-size:11px;font-weight:700;\
+color:#ef4444;text-transform:uppercase;\
+letter-spacing:2px;">
+          PORTFOLIO GAPS
         </p>
       </td></tr>
-      <tr><td style="padding:12px 24px 16px 24px;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr><td style="padding:16px 28px 20px 28px;">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0">
           {items}
         </table>
       </td></tr>
@@ -413,24 +540,37 @@ def _render_observations(briefing: DailyBriefing) -> str:
         <tr><td style="padding:6px 0;">
           <table cellpadding="0" cellspacing="0" border="0">
             <tr>
-              <td width="20" valign="top" style="font-size:13px;color:#2563eb;">•</td>
-              <td style="font-size:13px;color:#334155;line-height:1.5;">{obs}</td>
+              <td width="24" valign="top"
+                  style="font-size:8px;color:#3b82f6;\
+padding-top:4px;">
+                ●
+              </td>
+              <td style="font-size:13px;\
+color:rgba(255,255,255,0.5);line-height:1.6;">
+                {obs}
+              </td>
             </tr>
           </table>
         </td></tr>"""
 
     return f"""
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
-  <tr><td style="background-color:#ffffff;border-radius:12px;overflow:hidden;
-                 border:1px solid #bfdbfe;">
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="margin-top:20px;">
+  <tr><td style="background-color:#1a1a24;border-radius:16px;\
+overflow:hidden;border:1px solid rgba(59,130,246,0.15);">
     <table width="100%" cellpadding="0" cellspacing="0" border="0">
-      <tr><td style="padding:16px 24px 8px 24px;background-color:#eff6ff;border-bottom:1px solid #bfdbfe;">
-        <p style="margin:0;font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:1.5px;">
-          \U0001f4ca Observations
+      <tr><td style="padding:18px 28px 10px 28px;\
+background-color:rgba(59,130,246,0.05);\
+border-bottom:1px solid rgba(59,130,246,0.1);">
+        <p style="margin:0;font-size:11px;font-weight:700;\
+color:#3b82f6;text-transform:uppercase;\
+letter-spacing:2px;">
+          OBSERVATIONS
         </p>
       </td></tr>
-      <tr><td style="padding:12px 24px 16px 24px;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr><td style="padding:16px 28px 20px 28px;">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0">
           {items}
         </table>
       </td></tr>
@@ -464,18 +604,35 @@ def _render_directive_banner(directive: dict | None) -> str:
             obj_text = obj_text[:77] + "..."
         targets_html += f"""
             <tr><td style="padding:4px 0;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0fdf4;border-radius:6px;">
-                <tr><td style="padding:8px 12px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <table width="100%" cellpadding="0" cellspacing="0"
+                     border="0"
+                     style="background-color:rgba(16,185,129,0.06);\
+border-radius:8px;border:1px solid \
+rgba(16,185,129,0.12);">
+                <tr><td style="padding:10px 14px;">
+                  <table width="100%" cellpadding="0"
+                         cellspacing="0" border="0">
                     <tr>
-                      <td style="font-size:13px;font-weight:600;color:#166534;">#{rank} {track}</td>
+                      <td style="font-size:13px;font-weight:600;\
+color:#34d399;">
+                        #{rank} {track}
+                      </td>
                       <td align="right">
-                        <span style="font-size:11px;color:#15803d;font-weight:600;">{phase}</span>
-                        <span style="font-size:11px;color:#6b7280;padding-left:6px;">{hours}h</span>
+                        <span style="font-size:11px;\
+color:#10b981;font-weight:600;">
+                          {phase}
+                        </span>
+                        <span style="font-size:11px;\
+color:rgba(255,255,255,0.3);padding-left:8px;">
+                          {hours}h
+                        </span>
                       </td>
                     </tr>
                   </table>
-                  <p style="margin:4px 0 0 0;font-size:12px;color:#4b5563;line-height:1.4;">{obj_text}</p>
+                  <p style="margin:4px 0 0 0;font-size:12px;\
+color:rgba(255,255,255,0.4);line-height:1.4;">
+                    {obj_text}
+                  </p>
                 </td></tr>
               </table>
             </td></tr>"""
@@ -484,60 +641,262 @@ def _render_directive_banner(directive: dict | None) -> str:
     for a in alerts[:3]:
         severity = a.get("severity", "info").upper()
         msg = a.get("message", "")
-        sev_color = {"CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#2563eb"}.get(severity, "#6b7280")
+        sev_color = {
+            "CRITICAL": "#ef4444",
+            "HIGH": "#f97316",
+            "MEDIUM": "#3b82f6",
+        }.get(severity, "#6b7280")
         alerts_html += f"""
             <tr><td style="padding:3px 0;">
-              <span style="font-size:10px;font-weight:700;color:{sev_color};padding-right:6px;">{severity}</span>
-              <span style="font-size:12px;color:#374151;">{msg}</span>
+              <span style="font-size:10px;font-weight:700;\
+color:{sev_color};padding-right:6px;">
+                {severity}
+              </span>
+              <span style="font-size:12px;\
+color:rgba(255,255,255,0.5);">
+                {msg}
+              </span>
             </td></tr>"""
 
     constraints_html = ""
     for c in constraints[:3]:
         constraints_html += f"""
             <tr><td style="padding:3px 0;">
-              <span style="font-size:12px;color:#92400e;">⚡ {c}</span>
+              <span style="font-size:12px;\
+color:rgba(245,158,11,0.7);">
+                ⚡ {c}
+              </span>
             </td></tr>"""
 
     extra_sections = ""
     if alerts_html:
         extra_sections += f"""
-          <tr><td style="padding:10px 0 0 0;">
-            <p style="margin:0 0 4px 0;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Alerts</p>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">{alerts_html}</table>
+          <tr><td style="padding:12px 0 0 0;">
+            <p style="margin:0 0 6px 0;font-size:10px;\
+font-weight:700;color:rgba(255,255,255,0.25);\
+text-transform:uppercase;letter-spacing:1.5px;">
+              Alerts
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0"
+                   border="0">
+              {alerts_html}
+            </table>
           </td></tr>"""
     if constraints_html:
         extra_sections += f"""
-          <tr><td style="padding:10px 0 0 0;">
-            <p style="margin:0 0 4px 0;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Constraints</p>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">{constraints_html}</table>
+          <tr><td style="padding:12px 0 0 0;">
+            <p style="margin:0 0 6px 0;font-size:10px;\
+font-weight:700;color:rgba(255,255,255,0.25);\
+text-transform:uppercase;letter-spacing:1.5px;">
+              Constraints
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0"
+                   border="0">
+              {constraints_html}
+            </table>
           </td></tr>"""
 
     return f"""
-  <tr><td style="padding:0 32px 8px 32px;">
+  <tr><td style="padding:20px 40px 8px 40px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
-           style="background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;">
-      <tr><td style="padding:16px 20px 8px 20px;border-bottom:1px solid #bbf7d0;">
-        <p style="margin:0;font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:1.5px;">
-          \U0001f3af Weekly Directive
+           style="background-color:rgba(16,185,129,0.04);\
+border:1px solid rgba(16,185,129,0.15);\
+border-radius:14px;">
+      <tr><td style="padding:20px 24px 12px 24px;\
+border-bottom:1px solid rgba(16,185,129,0.1);">
+        <p style="margin:0;font-size:10px;font-weight:700;\
+color:#10b981;text-transform:uppercase;\
+letter-spacing:2px;">
+          WEEKLY DIRECTIVE
         </p>
-        <p style="margin:6px 0 0 0;font-size:16px;font-weight:700;color:#166534;line-height:1.3;">
+        <p style="margin:8px 0 0 0;font-size:18px;\
+font-weight:700;color:rgba(255,255,255,0.85);\
+line-height:1.3;">
           {theme}
         </p>
-        <p style="margin:4px 0 8px 0;font-size:13px;color:#4b5563;line-height:1.5;">
+        <p style="margin:6px 0 10px 0;font-size:13px;\
+color:rgba(255,255,255,0.4);line-height:1.6;">
           {focus}
         </p>
       </td></tr>
-      <tr><td style="padding:12px 20px 16px 20px;">
-        <p style="margin:0 0 6px 0;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">
+      <tr><td style="padding:16px 24px 20px 24px;">
+        <p style="margin:0 0 8px 0;font-size:10px;\
+font-weight:700;color:rgba(255,255,255,0.25);\
+text-transform:uppercase;letter-spacing:1.5px;">
           Weekly Targets
         </p>
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0">
           {targets_html}
         </table>
         {extra_sections}
       </td></tr>
     </table>
   </td></tr>"""
+
+
+def _render_opportunities(
+    opportunities: list[dict], today: str,
+) -> str:
+    if not opportunities:
+        return ""
+
+    from datetime import datetime as dt
+
+    try:
+        today_date = dt.fromisoformat(today).date()
+    except ValueError:
+        today_date = dt.now().date()
+
+    # Filter to future deadlines/events and sort by urgency
+    upcoming = []
+    for o in opportunities:
+        deadline = o.get("deadline")
+        event_start = o.get("event_start")
+        status = o.get("status", "discovered")
+        if status in ("expired", "skipped", "completed"):
+            continue
+        ref_date = deadline or event_start
+        if not ref_date:
+            continue
+        try:
+            ref = dt.fromisoformat(ref_date).date()
+            if ref < today_date:
+                continue
+            days_left = (ref - today_date).days
+        except ValueError:
+            days_left = 999
+        upcoming.append({**o, "_days_left": days_left, "_ref_date": ref_date})
+
+    upcoming.sort(key=lambda x: x["_days_left"])
+    upcoming = upcoming[:8]
+
+    if not upcoming:
+        return ""
+
+    items = ""
+    for o in upcoming:
+        days = o["_days_left"]
+        title = o.get("title", "")
+        url = o.get("url", "")
+        opp_type = o.get("opportunity_type", "other")
+        location = o.get("location", "")
+        ref_date = o.get("_ref_date", "")
+
+        # Urgency styling
+        if days <= 7:
+            urgency_color = "#ef4444"
+            urgency_bg = "rgba(239,68,68,0.12)"
+            urgency_text = f"{days}d left"
+            urgency_border = "rgba(239,68,68,0.3)"
+        elif days <= 14:
+            urgency_color = "#f97316"
+            urgency_bg = "rgba(249,115,22,0.1)"
+            urgency_text = f"{days}d left"
+            urgency_border = "rgba(249,115,22,0.25)"
+        elif days <= 30:
+            urgency_color = "#f59e0b"
+            urgency_bg = "rgba(245,158,11,0.08)"
+            urgency_text = f"{days}d left"
+            urgency_border = "rgba(245,158,11,0.2)"
+        else:
+            urgency_color = "#10b981"
+            urgency_bg = "rgba(16,185,129,0.06)"
+            urgency_text = f"{days}d"
+            urgency_border = "rgba(16,185,129,0.15)"
+
+        type_labels = {
+            "ctf": "CTF",
+            "conference_cfp": "CFP",
+            "bounty_program": "BOUNTY",
+            "certification": "CERT",
+            "training": "TRAINING",
+            "other": "EVENT",
+        }
+        type_label = type_labels.get(opp_type, "EVENT")
+
+        title_html = (
+            f'<a href="{url}" style="color:rgba(255,255,255,0.85);'
+            f'font-weight:600;text-decoration:none;">{title}</a>'
+            if url
+            else f'<span style="color:rgba(255,255,255,0.85);'
+            f'font-weight:600;">{title}</span>'
+        )
+
+        location_html = ""
+        if location:
+            location_html = (
+                f'<span style="font-size:11px;'
+                f'color:rgba(255,255,255,0.3);padding-left:8px;">'
+                f"\U0001f4cd {location}</span>"
+            )
+
+        items += f"""
+        <tr><td style="padding:5px 0;">
+          <table width="100%" cellpadding="0" cellspacing="0"
+                 border="0"
+                 style="background-color:{urgency_bg};\
+border-radius:10px;border:1px solid {urgency_border};">
+            <tr><td style="padding:14px 16px;">
+              <table width="100%" cellpadding="0" cellspacing="0"
+                     border="0">
+                <tr>
+                  <td>
+                    <span style="display:inline-block;\
+background-color:rgba(255,255,255,0.08);\
+color:rgba(255,255,255,0.5);font-size:9px;\
+font-weight:700;padding:3px 8px;\
+border-radius:4px;text-transform:uppercase;\
+letter-spacing:0.5px;">
+                      {type_label}
+                    </span>{location_html}
+                  </td>
+                  <td align="right">
+                    <span style="display:inline-block;\
+background-color:{urgency_color};color:#ffffff;\
+font-size:10px;font-weight:700;\
+padding:3px 10px;border-radius:5px;">
+                      {urgency_text}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:8px 0 2px 0;font-size:13px;\
+line-height:1.4;">
+                {title_html}
+              </p>
+              <p style="margin:0;font-size:11px;\
+color:rgba(255,255,255,0.3);">
+                {ref_date}
+              </p>
+            </td></tr>
+          </table>
+        </td></tr>"""
+
+    return f"""
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="margin-top:20px;">
+  <tr><td style="background-color:#1a1a24;border-radius:16px;\
+overflow:hidden;border:1px solid rgba(245,158,11,0.15);">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr><td style="padding:18px 28px 10px 28px;\
+background-color:rgba(245,158,11,0.05);\
+border-bottom:1px solid rgba(245,158,11,0.1);">
+        <p style="margin:0;font-size:11px;font-weight:700;\
+color:#f59e0b;text-transform:uppercase;\
+letter-spacing:2px;">
+          UPCOMING OPPORTUNITIES
+        </p>
+      </td></tr>
+      <tr><td style="padding:16px 28px 20px 28px;">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0">
+          {items}
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>"""
 
 
 def _render_newsletter(briefing: DailyBriefing) -> str:
@@ -550,27 +909,41 @@ def _render_newsletter(briefing: DailyBriefing) -> str:
         <tr><td style="padding:4px 0;">
           <table cellpadding="0" cellspacing="0" border="0">
             <tr>
-              <td width="20" valign="top" style="font-size:13px;color:#dc2626;">⚠</td>
-              <td style="font-size:13px;color:#7f1d1d;line-height:1.5;">{topic}</td>
+              <td width="24" valign="top"
+                  style="font-size:14px;color:#ef4444;">
+                ⚠
+              </td>
+              <td style="font-size:13px;\
+color:rgba(255,255,255,0.55);line-height:1.6;">
+                {topic}
+              </td>
             </tr>
           </table>
         </td></tr>"""
 
     return f"""
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
-  <tr><td style="background-color:#ffffff;border-radius:12px;overflow:hidden;
-                 border:1px solid #fecaca;">
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+       style="margin-top:20px;">
+  <tr><td style="background-color:#1a1a24;border-radius:16px;\
+overflow:hidden;border:1px solid rgba(239,68,68,0.2);">
     <table width="100%" cellpadding="0" cellspacing="0" border="0">
-      <tr><td style="padding:16px 24px 8px 24px;background-color:#fef2f2;border-bottom:1px solid #fecaca;">
-        <p style="margin:0;font-size:11px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:1.5px;">
-          \U0001f4ec Newsletter Agent — Action Required
+      <tr><td style="padding:18px 28px 10px 28px;\
+background-color:rgba(239,68,68,0.06);\
+border-bottom:1px solid rgba(239,68,68,0.12);">
+        <p style="margin:0;font-size:11px;font-weight:700;\
+color:#ef4444;text-transform:uppercase;\
+letter-spacing:2px;">
+          NEWSLETTER AGENT &mdash; ACTION REQUIRED
         </p>
-        <p style="margin:4px 0 0 0;font-size:12px;color:#b91c1c;">
-          Run the newsletter agent with these search terms to fill content gaps
+        <p style="margin:4px 0 0 0;font-size:12px;\
+color:rgba(255,255,255,0.4);">
+          Run the newsletter agent with these search terms \
+to fill content gaps
         </p>
       </td></tr>
-      <tr><td style="padding:12px 24px 16px 24px;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr><td style="padding:16px 28px 20px 28px;">
+        <table width="100%" cellpadding="0" cellspacing="0"
+               border="0">
           {items}
         </table>
       </td></tr>

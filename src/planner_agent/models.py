@@ -266,6 +266,7 @@ class Opportunity(BaseModel):
     status: OpportunityStatus = OpportunityStatus.DISCOVERED
     priority: Priority = Priority.MEDIUM
     notes: str = ""
+    location: str = ""
     source: str = ""
     discovered_at: datetime | None = None
     updated_at: datetime | None = None
