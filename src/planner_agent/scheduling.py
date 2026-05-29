@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -112,7 +111,7 @@ def _install_crontab(time_str: str, config_path: str) -> str:
     existing = result.stdout if result.returncode == 0 else ""
 
     # Remove old entry
-    lines = [l for l in existing.splitlines() if PLIST_LABEL not in l]
+    lines = [ln for ln in existing.splitlines() if PLIST_LABEL not in ln]
     lines.append(f"{cron_line}  {marker}")
 
     subprocess.run(
@@ -127,7 +126,7 @@ def _uninstall_crontab() -> bool:
     result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     if result.returncode != 0:
         return False
-    lines = [l for l in result.stdout.splitlines() if PLIST_LABEL not in l]
+    lines = [ln for ln in result.stdout.splitlines() if PLIST_LABEL not in ln]
     if len(lines) == len(result.stdout.splitlines()):
         return False
     subprocess.run(

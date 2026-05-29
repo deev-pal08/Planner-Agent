@@ -27,10 +27,10 @@ PRIORITY_SHORT = {
 }
 
 DEFAULT_LIMITS = {
-    "CRITICAL": 10,
-    "IMPORTANT": 15,
-    "INTERESTING": 10,
-    "REFERENCE": 5,
+    "CRITICAL": 15,
+    "IMPORTANT": 20,
+    "INTERESTING": 15,
+    "REFERENCE": 10,
 }
 
 

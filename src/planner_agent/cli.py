@@ -45,17 +45,16 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
     """Full daily cycle: generate briefing, send email."""
     config = ctx.obj["config"]
 
-    from planner_agent.agent.loop import BriefingParseError, PlannerAgent
+    from planner_agent.agent.base import BriefingParseError
+    from planner_agent.agent.orchestrator import Orchestrator
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
-    agent = PlannerAgent(config, state)
 
     from datetime import UTC, datetime
 
     today = date or datetime.now(UTC).strftime("%Y-%m-%d")
 
-    # Issue 6: dedup check
     if not force and state.briefing_exists_for_date(today):
         click.echo(f"Briefing already generated for {today}. Use --force to regenerate.")
         return
@@ -65,13 +64,12 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
         if deleted:
             click.echo(f"Cleared {deleted} pending tasks from previous briefing.")
 
-    # Step 1: Generate today's briefing
-    click.echo("Generating daily briefing...")
+    click.echo("Running daily cycle...")
     try:
-        briefing = agent.generate_briefing(target_date=date)
+        orchestrator = Orchestrator(config, state)
+        briefing = orchestrator.run_daily(target_date=date, force=force)
     except (BriefingParseError, Exception) as e:
         click.echo(click.style(f"\nBriefing generation failed: {e}", fg="red"))
-        # Issue 8: fallback email
         if not no_email and config.email.enabled and config.email.to_addresses:
             try:
                 from planner_agent.email.sender import EmailSender
@@ -104,13 +102,13 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
                 )
                 click.echo("Failure notification email sent.")
             except Exception as email_err:
-                click.echo(click.style(f"Failed to send notification: {email_err}", fg="red"))
+                click.echo(click.style(
+                    f"Failed to send notification: {email_err}", fg="red",
+                ))
         sys.exit(1)
 
-    # Step 2: Print briefing to terminal
     _print_briefing(briefing)
 
-    # Step 3: Send email
     if not no_email and config.email.enabled and config.email.to_addresses:
         try:
             from planner_agent.email.sender import EmailSender
@@ -120,13 +118,16 @@ def daily(ctx: click.Context, date: str | None, no_email: bool, force: bool) -> 
                 from_address=config.email.from_address,
                 to_addresses=config.email.to_addresses,
             )
-            message_id = sender.send_briefing(briefing)
+            message_id = sender.send_briefing(briefing, directive=orchestrator.last_directive)
 
             last_briefing = state.get_last_briefing()
             if last_briefing:
                 state.update_briefing_email(last_briefing["id"], message_id)
 
-            click.echo(f"\nBriefing email sent to {', '.join(config.email.to_addresses)}")
+            click.echo(
+                f"\nBriefing email sent to "
+                f"{', '.join(config.email.to_addresses)}"
+            )
         except Exception as e:
             click.echo(click.style(f"\nEmail send failed: {e}", fg="red"))
     elif no_email:
@@ -141,11 +142,11 @@ def briefing(ctx: click.Context, date: str | None, force: bool) -> None:
     """Generate and display daily briefing (no email)."""
     config = ctx.obj["config"]
 
-    from planner_agent.agent.loop import BriefingParseError, PlannerAgent
+    from planner_agent.agent.base import BriefingParseError
+    from planner_agent.agent.orchestrator import Orchestrator
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
-    agent = PlannerAgent(config, state)
 
     from datetime import UTC, datetime
 
@@ -160,9 +161,10 @@ def briefing(ctx: click.Context, date: str | None, force: bool) -> None:
         if deleted:
             click.echo(f"Cleared {deleted} pending tasks from previous briefing.")
 
-    click.echo("Generating daily briefing...")
+    click.echo("Running daily cycle...")
     try:
-        b = agent.generate_briefing(target_date=date)
+        orchestrator = Orchestrator(config, state)
+        b = orchestrator.run_daily(target_date=date, force=force)
     except BriefingParseError as e:
         click.echo(click.style(f"\nBriefing generation failed: {e}", fg="red"))
         sys.exit(1)
@@ -226,11 +228,13 @@ def complete(ctx: click.Context, task_id: int, hours: float | None, notes: str) 
         click.echo(f"  Notes: {notes}")
 
     if notes:
-        from planner_agent.agent.loop import PlannerAgent
+        from planner_agent.agent.analyst import AnalystBrain
 
-        agent = PlannerAgent(config, state)
-        click.echo("Updating learning summary...")
-        agent.update_learning_summary()
+        analyst = AnalystBrain(config, state)
+        click.echo("Updating intelligence profile...")
+        analyst.update_from_single_task(
+            task=task, status="done", hours=hours, notes=notes,
+        )
 
 
 @cli.command()
@@ -251,77 +255,195 @@ def skip(ctx: click.Context, task_id: int, reason: str) -> None:
     click.echo(f"Task #{task_id} marked as skipped.")
 
     if reason:
-        from planner_agent.agent.loop import PlannerAgent
+        from planner_agent.agent.analyst import AnalystBrain
 
-        agent = PlannerAgent(config, state)
-        click.echo("Updating learning summary...")
-        agent.update_learning_summary()
+        task = state.get_task_by_id(task_id)
+        if task:
+            analyst = AnalystBrain(config, state)
+            click.echo("Updating intelligence profile...")
+            analyst.update_from_single_task(
+                task=task, status="skipped", notes=reason,
+            )
 
 
 @cli.command()
 @click.pass_context
 def status(ctx: click.Context) -> None:
-    """Show current state across all tracks."""
+    """Show current state — goals, milestones, skills, directive, profile."""
     config = ctx.obj["config"]
+
+    from datetime import UTC, datetime
 
     from planner_agent.state.store import StateStore
 
     state = StateStore(config.state_dir)
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
 
     click.echo("\nPlanner Agent Status")
-    click.echo("=" * 50)
+    click.echo("=" * 60)
 
-    # Last briefing
+    # --- Active Directive ---
+    directive_row = state.get_active_directive()
+    if directive_row:
+        d = directive_row.get("directive", {})
+        click.echo(click.style(
+            f"\n  This Week: {d.get('weekly_theme', 'N/A')}",
+            fg="cyan", bold=True,
+        ))
+        click.echo(f"  {d.get('strategic_focus', '')}")
+        click.echo(
+            f"  Period: {directive_row.get('week_start', '?')} — "
+            f"{directive_row.get('week_end', '?')} | "
+            f"Hours: {d.get('total_hours_available', 0):.0f}h"
+        )
+        targets = d.get("targets", [])
+        if targets:
+            for t in sorted(targets, key=lambda x: x.get("priority_rank", 99)):
+                click.echo(
+                    f"    #{t['priority_rank']} {t['track_id']}: "
+                    f"{t['hours_allocated']}h ({t['phase']})"
+                )
+        alerts = d.get("alerts", [])
+        for a in alerts:
+            color = "red" if a.get("severity") == "critical" else "yellow"
+            click.echo(click.style(
+                f"    [{a['severity'].upper()}] {a['message']}", fg=color,
+            ))
+
+    # --- Goals ---
+    goals = state.get_active_goals()
+    if goals:
+        click.echo(click.style("\n  Goals:", fg="green", bold=True))
+        for g in goals:
+            deadline = g.get("deadline", "no deadline")
+            if deadline and deadline != "no deadline":
+                dt = datetime.fromisoformat(deadline)
+                days_left = (dt - datetime.fromisoformat(today)).days
+                countdown = f"{days_left}d left"
+            else:
+                countdown = "no deadline"
+            click.echo(
+                f"    [{g.get('priority', '?').upper()}] "
+                f"{g['title']} ({countdown})"
+            )
+            milestones = state.get_milestones_by_goal(g["id"])
+            if milestones:
+                done_ms = sum(
+                    1 for m in milestones if m["status"] == "completed"
+                )
+                click.echo(
+                    f"      Milestones: {done_ms}/{len(milestones)} done"
+                )
+                for m in milestones[:3]:
+                    status_icon = {
+                        "completed": "done",
+                        "in_progress": "WIP",
+                        "at_risk": "RISK",
+                        "blocked": "BLOCKED",
+                    }.get(m["status"], "pending")
+                    click.echo(
+                        f"        [{status_icon}] {m['title']} "
+                        f"(by {m['target_date']})"
+                    )
+                if len(milestones) > 3:
+                    click.echo(
+                        f"        ... +{len(milestones) - 3} more"
+                    )
+
+    # --- Last briefing ---
     last = state.get_last_briefing()
     if last:
-        click.echo(f"  Last briefing: {last['date'][:10]} ({last['focus_track']})")
+        click.echo(f"\n  Last briefing: {last['date'][:10]} ({last['focus_track']})")
     else:
-        click.echo("  Last briefing: never (run `planner init` first)")
+        click.echo("\n  Last briefing: never (run `planner daily` first)")
 
-    # Completion stats
+    # --- Completion stats ---
     stats = state.get_completion_stats()
     total = stats.get("total", 0) or 0
     done = stats.get("done", 0) or 0
     hours = stats.get("hours_done", 0) or 0
     rate = (done / total * 100) if total > 0 else 0
-    click.echo(f"\n  Recent: {done}/{total} tasks ({rate:.0f}%), {hours:.1f}h logged")
+    click.echo(
+        f"  Progress: {done}/{total} tasks ({rate:.0f}%), "
+        f"{hours:.1f}h logged"
+    )
 
-    # Skill tracks
+    # --- Skill tracks ---
     skills = state.get_all_skills()
     if skills:
-        click.echo("\n  Skill Tracks:")
+        click.echo(click.style("\n  Skill Tracks:", bold=True))
         for s in skills:
             h = s.get("hours_invested", 0) or 0
             items = s.get("items_completed", 0) or 0
-            phase_icon = {"learn": "📖", "practice": "🔬", "produce": "🚀"}.get(
-                s["current_phase"], "?"
-            )
+            comp = s.get("competence_level", "novice")
+            phase_icon = {
+                "learn": "L", "practice": "P", "produce": "X",
+            }.get(s["current_phase"], "?")
             click.echo(
-                f"    {phase_icon} {s['name']:<30} "
-                f"phase={s['current_phase']:<10} "
-                f"{h:>5.1f}h  {items:>3} items"
+                f"    [{phase_icon}] {s['name']:<28} "
+                f"{h:>5.1f}h  {items:>3} items  "
+                f"({comp})"
             )
 
-    # Achievements
+    # --- Intelligence profile summary ---
+    profile_json = state.get_meta("user_intelligence_profile")
+    if profile_json:
+        from planner_agent.models import UserIntelligenceProfile
+        profile = UserIntelligenceProfile.model_validate_json(profile_json)
+        if profile.confidence_indicators:
+            click.echo(click.style("\n  Strengths:", fg="green"))
+            for c in profile.confidence_indicators[:3]:
+                click.echo(f"    + {c}")
+        if profile.concern_indicators:
+            click.echo(click.style("  Concerns:", fg="red"))
+            for c in profile.concern_indicators[:3]:
+                click.echo(f"    - {c}")
+
+    # --- Portfolio ---
     counts = state.get_achievement_counts()
     if counts:
         click.echo("\n  Portfolio:")
         for atype, count in sorted(counts.items()):
             click.echo(f"    {atype}: {count}")
     else:
-        click.echo("\n  Portfolio: empty (use `planner log-achievement` to add)")
+        click.echo(
+            "\n  Portfolio: empty (use `planner log-achievement` to add)"
+        )
 
-    # Skipped patterns
-    skipped = state.get_skipped_patterns()
-    if skipped:
-        click.echo(click.style("\n  Skipping patterns (recent tasks):", fg="yellow"))
-        for p in skipped:
-            click.echo(
-                click.style(
-                    f"    {p['track']}/{p['task_type']}: skipped {p['skip_count']}x",
-                    fg="yellow",
+    # --- API cost tracking ---
+    brain_names = ["strategist", "tactician", "critic", "analyst", "scout"]
+    cost_lines = []
+    total_input = 0
+    total_output = 0
+    total_calls = 0
+    for bn in brain_names:
+        raw = state.get_meta(f"tokens_{bn}")
+        if raw:
+            import json as _json
+            try:
+                data = _json.loads(raw)
+                inp = data.get("input", 0)
+                out = data.get("output", 0)
+                calls = data.get("calls", 0)
+                total_input += inp
+                total_output += out
+                total_calls += calls
+                cost_lines.append(
+                    f"    {bn:<12} {calls:>3} calls  "
+                    f"{inp:>7,} in / {out:>7,} out"
                 )
-            )
+            except (ValueError, TypeError):
+                pass
+    if cost_lines:
+        click.echo(click.style("\n  API Usage (cumulative):", bold=True))
+        for line in cost_lines:
+            click.echo(line)
+        click.echo(
+            f"    {'TOTAL':<12} {total_calls:>3} calls  "
+            f"{total_input:>7,} in / {total_output:>7,} out"
+        )
+
+    click.echo()
 
 
 @cli.command()
@@ -364,7 +486,7 @@ def portfolio(ctx: click.Context) -> None:
             click.echo(click.style(f"  {label}: {count}", fg="green"))
 
     if achievements:
-        click.echo(f"\n  Recent achievements:")
+        click.echo("\n  Recent achievements:")
         for a in achievements[:10]:
             click.echo(f"    [{a['achievement_type']}] {a['title']}")
             if a.get("url"):
@@ -432,7 +554,10 @@ def init(ctx: click.Context) -> None:
     # Log existing achievements
     click.echo("\nSkill tracks initialized from config.yaml.")
     click.echo("Next steps:")
-    click.echo("  1. Log existing achievements: planner log-achievement --type hall_of_fame --title 'Atlassian HoF #1'")
+    click.echo(
+        "  1. Log existing achievements: "
+        "planner log-achievement --type hall_of_fame --title 'Atlassian HoF #1'"
+    )
     click.echo("  2. Generate first briefing: planner daily --no-email")
     click.echo("  3. Configure email in config.yaml and .env")
     click.echo("  4. Install schedule: planner install-schedule")
@@ -508,8 +633,6 @@ def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -
     if not replies:
         return 0
 
-    reply = replies[-1]
-
     combined_body = "\n\n---\n\n".join(r["body"] for r in replies)
 
     briefing_tasks = json.loads(last_briefing.get("tasks_json", "[]"))
@@ -542,8 +665,11 @@ def _process_replies_impl(config, state, agent, *, auto_confirm: bool = False) -
     updated = agent.apply_feedback(feedback, briefing_tasks)
 
     if updated > 0:
-        click.echo("Updating learning summary...")
-        agent.update_learning_summary(feedback=feedback, briefing_tasks=briefing_tasks)
+        click.echo("Updating intelligence profile...")
+        from planner_agent.agent.analyst import AnalystBrain
+
+        analyst = AnalystBrain(config, state)
+        analyst.update_profile(feedback=feedback, briefing_tasks=briefing_tasks)
 
     return updated
 

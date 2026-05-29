@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,8 +11,13 @@ from typing import Any
 
 from planner_agent.models import (
     Achievement,
+    Goal,
+    Milestone,
+    Opportunity,
     Task,
 )
+
+log = logging.getLogger(__name__)
 
 CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS skills (
@@ -93,6 +99,118 @@ CREATE INDEX IF NOT EXISTS idx_briefings_date ON daily_briefings(date);
 CREATE INDEX IF NOT EXISTS idx_achievements_type ON achievements(achievement_type);
 """
 
+# ---------------------------------------------------------------------------
+# v3 Migration: Multi-Brain tables + column additions
+# ---------------------------------------------------------------------------
+MIGRATION_V3 = """
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    deadline TEXT,
+    success_criteria TEXT DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active',
+    priority TEXT NOT NULL DEFAULT 'high',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS milestones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    target_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'not_started',
+    completion_date TEXT,
+    depends_on TEXT DEFAULT '[]',
+    tracks TEXT DEFAULT '[]',
+    success_criteria TEXT DEFAULT '[]',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (goal_id) REFERENCES goals(id)
+);
+
+CREATE TABLE IF NOT EXISTS strategic_directives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_start TEXT NOT NULL,
+    week_end TEXT NOT NULL,
+    directive_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL,
+    critic_review_id INTEGER,
+    FOREIGN KEY (critic_review_id) REFERENCES weekly_reviews(id)
+);
+
+CREATE TABLE IF NOT EXISTS weekly_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_start TEXT NOT NULL,
+    week_end TEXT NOT NULL,
+    review_json TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS competence_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id TEXT NOT NULL,
+    assessed_at TIMESTAMP NOT NULL,
+    assessor TEXT NOT NULL DEFAULT 'analyst',
+    phase TEXT NOT NULL,
+    competence_level TEXT NOT NULL DEFAULT 'novice',
+    sub_skills_json TEXT DEFAULT '{}',
+    evidence TEXT DEFAULT '',
+    learning_velocity REAL,
+    engagement_score REAL,
+    notes TEXT DEFAULT '',
+    FOREIGN KEY (track_id) REFERENCES skills(track_id)
+);
+
+CREATE TABLE IF NOT EXISTS opportunities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    opportunity_type TEXT NOT NULL,
+    url TEXT DEFAULT '',
+    deadline TEXT,
+    event_start TEXT,
+    event_end TEXT,
+    tracks TEXT DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'discovered',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    notes TEXT DEFAULT '',
+    source TEXT DEFAULT '',
+    discovered_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_milestones_goal ON milestones(goal_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_target ON milestones(target_date);
+CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status);
+CREATE INDEX IF NOT EXISTS idx_directives_week ON strategic_directives(week_start);
+CREATE INDEX IF NOT EXISTS idx_directives_status ON strategic_directives(status);
+CREATE INDEX IF NOT EXISTS idx_competence_track ON competence_log(track_id);
+CREATE INDEX IF NOT EXISTS idx_competence_date ON competence_log(assessed_at);
+CREATE INDEX IF NOT EXISTS idx_opportunities_deadline ON opportunities(deadline);
+CREATE INDEX IF NOT EXISTS idx_opportunities_status ON opportunities(status);
+CREATE INDEX IF NOT EXISTS idx_reviews_week ON weekly_reviews(week_start);
+"""
+
+# Columns added to existing tables in v3 (each wrapped individually for idempotency)
+_V3_ALTER_COLUMNS = [
+    "ALTER TABLE tasks ADD COLUMN milestone_id INTEGER",
+    "ALTER TABLE tasks ADD COLUMN directive_id INTEGER",
+    "ALTER TABLE tasks ADD COLUMN quality_score REAL",
+    "ALTER TABLE tasks ADD COLUMN quality_notes TEXT DEFAULT ''",
+    "ALTER TABLE skills ADD COLUMN competence_level TEXT DEFAULT 'novice'",
+    "ALTER TABLE skills ADD COLUMN sub_skills_json TEXT DEFAULT '{}'",
+    "ALTER TABLE daily_briefings ADD COLUMN directive_id INTEGER",
+]
+
+_V3_ALTER_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_tasks_milestone ON tasks(milestone_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_directive ON tasks(directive_id)",
+]
+
 
 class StateStore:
     def __init__(self, state_dir: str | Path):
@@ -104,6 +222,7 @@ class StateStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(CREATE_TABLES)
         self._conn.commit()
+        self._run_migrations()
 
     # --- Skills ---
 
@@ -156,13 +275,14 @@ class StateStore:
             """INSERT INTO tasks
                (title, description, task_type, track, phase, priority,
                 estimated_hours, status, resource_url, resource_name,
-                why, assigned_date)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                why, assigned_date, milestone_id, directive_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task.title, task.description, task.task_type, task.track,
                 task.phase, task.priority, task.estimated_hours, task.status,
                 task.resource_url, task.resource_name, task.why,
                 (task.assigned_date or datetime.now(UTC)).isoformat(),
+                task.milestone_id, task.directive_id,
             ),
         )
         self._conn.commit()
@@ -250,7 +370,9 @@ class StateStore:
                 track,
                 COUNT(*) as total_tasks,
                 SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as completed,
-                SUM(CASE WHEN status = 'done' THEN COALESCE(actual_hours, estimated_hours) ELSE 0 END) as hours
+                SUM(CASE WHEN status = 'done'
+                    THEN COALESCE(actual_hours, estimated_hours)
+                    ELSE 0 END) as hours
                FROM tasks
                GROUP BY track
                ORDER BY hours DESC""",
@@ -310,7 +432,8 @@ class StateStore:
 
     def get_achievement_counts(self) -> dict[str, int]:
         rows = self._conn.execute(
-            "SELECT achievement_type, COUNT(*) as count FROM achievements GROUP BY achievement_type",
+            "SELECT achievement_type, COUNT(*) as count "
+            "FROM achievements GROUP BY achievement_type",
         ).fetchall()
         return {r["achievement_type"]: r["count"] for r in rows}
 
@@ -327,17 +450,18 @@ class StateStore:
         skill_observations: list[str],
         newsletter_topics: list[str],
         total_hours: float,
+        directive_id: int | None = None,
     ) -> int:
         cursor = self._conn.execute(
             """INSERT INTO daily_briefings
                (date, focus_track, focus_phase, focus_rationale, tasks_json,
                 portfolio_gaps_json, skill_observations_json,
-                newsletter_topics_json, total_estimated_hours)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                newsletter_topics_json, total_estimated_hours, directive_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 date, focus_track, focus_phase, focus_rationale, tasks_json,
                 json.dumps(portfolio_gaps), json.dumps(skill_observations),
-                json.dumps(newsletter_topics), total_hours,
+                json.dumps(newsletter_topics), total_hours, directive_id,
             ),
         )
         self._conn.commit()
@@ -471,6 +595,345 @@ class StateStore:
     @property
     def last_briefing_date(self) -> str | None:
         return self.get_meta("last_briefing_date")
+
+    # --- Migration ---
+
+    def _run_migrations(self) -> None:
+        """Apply schema migrations idempotently."""
+        version = self.get_meta("schema_version") or "v1"
+        if version >= "v3":
+            return
+        log.info("Running v3 migration: multi-brain tables")
+        self._conn.executescript(MIGRATION_V3)
+        for stmt in _V3_ALTER_COLUMNS:
+            try:
+                self._conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+        for stmt in _V3_ALTER_INDEXES:
+            self._conn.execute(stmt)
+        self._conn.commit()
+        self.set_meta("schema_version", "v3")
+        log.info("v3 migration complete")
+
+    # --- Goals ---
+
+    def add_goal(self, goal: Goal) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self._conn.execute(
+            """INSERT INTO goals
+               (title, description, deadline, success_criteria, status, priority,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                goal.title, goal.description, goal.deadline,
+                json.dumps(goal.success_criteria), goal.status, goal.priority,
+                now, now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_all_goals(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM goals ORDER BY priority, id",
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["success_criteria"] = json.loads(d.get("success_criteria") or "[]")
+            result.append(d)
+        return result
+
+    def get_active_goals(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM goals WHERE status = 'active' ORDER BY priority, id",
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["success_criteria"] = json.loads(d.get("success_criteria") or "[]")
+            result.append(d)
+        return result
+
+    def get_goal_by_id(self, goal_id: int) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM goals WHERE id = ?", (goal_id,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["success_criteria"] = json.loads(d.get("success_criteria") or "[]")
+        return d
+
+    def update_goal_status(self, goal_id: int, status: str) -> None:
+        self._conn.execute(
+            "UPDATE goals SET status = ?, updated_at = ? WHERE id = ?",
+            (status, datetime.now(UTC).isoformat(), goal_id),
+        )
+        self._conn.commit()
+
+    # --- Milestones ---
+
+    def add_milestone(self, milestone: Milestone) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self._conn.execute(
+            """INSERT INTO milestones
+               (goal_id, title, description, target_date, status,
+                depends_on, tracks, success_criteria, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                milestone.goal_id, milestone.title, milestone.description,
+                milestone.target_date, milestone.status,
+                json.dumps(milestone.depends_on), json.dumps(milestone.tracks),
+                json.dumps(milestone.success_criteria), now, now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_all_milestones(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM milestones ORDER BY target_date",
+        ).fetchall()
+        return [self._parse_milestone_row(r) for r in rows]
+
+    def get_milestones_by_goal(self, goal_id: int) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM milestones WHERE goal_id = ? ORDER BY target_date",
+            (goal_id,),
+        ).fetchall()
+        return [self._parse_milestone_row(r) for r in rows]
+
+    def get_milestone_by_id(self, milestone_id: int) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM milestones WHERE id = ?", (milestone_id,),
+        ).fetchone()
+        return self._parse_milestone_row(row) if row else None
+
+    def update_milestone_status(self, milestone_id: int, status: str) -> None:
+        updates = ["status = ?", "updated_at = ?"]
+        params: list[Any] = [status, datetime.now(UTC).isoformat()]
+        if status == "completed":
+            updates.append("completion_date = ?")
+            params.append(datetime.now(UTC).strftime("%Y-%m-%d"))
+        params.append(milestone_id)
+        self._conn.execute(
+            f"UPDATE milestones SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        self._conn.commit()
+
+    def _parse_milestone_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        d = dict(row)
+        d["depends_on"] = json.loads(d.get("depends_on") or "[]")
+        d["tracks"] = json.loads(d.get("tracks") or "[]")
+        d["success_criteria"] = json.loads(d.get("success_criteria") or "[]")
+        return d
+
+    # --- Strategic Directives ---
+
+    def save_directive(
+        self,
+        week_start: str,
+        week_end: str,
+        directive_json: str,
+        critic_review_id: int | None = None,
+    ) -> int:
+        # Supersede any active directive for overlapping weeks
+        self._conn.execute(
+            "UPDATE strategic_directives SET status = 'superseded' WHERE status = 'active'",
+        )
+        cursor = self._conn.execute(
+            """INSERT INTO strategic_directives
+               (week_start, week_end, directive_json, status, created_at, critic_review_id)
+               VALUES (?, ?, ?, 'active', ?, ?)""",
+            (week_start, week_end, directive_json,
+             datetime.now(UTC).isoformat(), critic_review_id),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_active_directive(self) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM strategic_directives "
+            "WHERE status = 'active' ORDER BY created_at DESC LIMIT 1",
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["directive"] = json.loads(d["directive_json"])
+        return d
+
+    def get_directive_by_week(self, week_start: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM strategic_directives "
+            "WHERE week_start = ? ORDER BY created_at DESC LIMIT 1",
+            (week_start,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["directive"] = json.loads(d["directive_json"])
+        return d
+
+    # --- Weekly Reviews ---
+
+    def save_weekly_review(
+        self, week_start: str, week_end: str, review_json: str,
+    ) -> int:
+        cursor = self._conn.execute(
+            """INSERT INTO weekly_reviews (week_start, week_end, review_json, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (week_start, week_end, review_json, datetime.now(UTC).isoformat()),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_latest_review(self) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM weekly_reviews ORDER BY created_at DESC LIMIT 1",
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["review"] = json.loads(d["review_json"])
+        return d
+
+    def get_review_by_week(self, week_start: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM weekly_reviews WHERE week_start = ? ORDER BY created_at DESC LIMIT 1",
+            (week_start,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["review"] = json.loads(d["review_json"])
+        return d
+
+    # --- Competence Log ---
+
+    def add_competence_entry(
+        self,
+        track_id: str,
+        phase: str,
+        competence_level: str,
+        sub_skills_json: str = "{}",
+        evidence: str = "",
+        learning_velocity: float | None = None,
+        engagement_score: float | None = None,
+        notes: str = "",
+        assessor: str = "analyst",
+    ) -> int:
+        cursor = self._conn.execute(
+            """INSERT INTO competence_log
+               (track_id, assessed_at, assessor, phase, competence_level,
+                sub_skills_json, evidence, learning_velocity, engagement_score, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                track_id, datetime.now(UTC).isoformat(), assessor, phase,
+                competence_level, sub_skills_json, evidence,
+                learning_velocity, engagement_score, notes,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_competence_history(
+        self, track_id: str, limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT * FROM competence_log
+               WHERE track_id = ? ORDER BY assessed_at DESC LIMIT ?""",
+            (track_id, limit),
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["sub_skills"] = json.loads(d.get("sub_skills_json") or "{}")
+            result.append(d)
+        return result
+
+    def get_latest_competence(self, track_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            """SELECT * FROM competence_log
+               WHERE track_id = ? ORDER BY assessed_at DESC LIMIT 1""",
+            (track_id,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["sub_skills"] = json.loads(d.get("sub_skills_json") or "{}")
+        return d
+
+    # --- Opportunities ---
+
+    def add_opportunity(self, opp: Opportunity) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self._conn.execute(
+            """INSERT INTO opportunities
+               (title, description, opportunity_type, url, deadline,
+                event_start, event_end, tracks, status, priority,
+                notes, source, discovered_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                opp.title, opp.description, opp.opportunity_type, opp.url,
+                opp.deadline, opp.event_start, opp.event_end,
+                json.dumps(opp.tracks), opp.status, opp.priority,
+                opp.notes, opp.source, now, now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_all_opportunities(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM opportunities ORDER BY deadline ASC NULLS LAST, priority",
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["tracks"] = json.loads(d.get("tracks") or "[]")
+            result.append(d)
+        return result
+
+    def get_upcoming_opportunities(self, today: str | None = None) -> list[dict[str, Any]]:
+        today = today or datetime.now(UTC).strftime("%Y-%m-%d")
+        rows = self._conn.execute(
+            """SELECT * FROM opportunities
+               WHERE status IN ('discovered', 'registered', 'in_progress')
+               AND (deadline IS NULL OR deadline >= ?)
+               ORDER BY deadline ASC NULLS LAST""",
+            (today,),
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["tracks"] = json.loads(d.get("tracks") or "[]")
+            result.append(d)
+        return result
+
+    def update_opportunity_status(self, opp_id: int, status: str) -> None:
+        self._conn.execute(
+            "UPDATE opportunities SET status = ?, updated_at = ? WHERE id = ?",
+            (status, datetime.now(UTC).isoformat(), opp_id),
+        )
+        self._conn.commit()
+
+    # --- Tasks (v3 extensions) ---
+
+    def get_tasks_for_week(
+        self, week_start: str, week_end: str,
+    ) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT * FROM tasks
+               WHERE DATE(assigned_date) >= DATE(?)
+               AND DATE(assigned_date) <= DATE(?)
+               ORDER BY assigned_date, id""",
+            (week_start, week_end),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         self._conn.close()

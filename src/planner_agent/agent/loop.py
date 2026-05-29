@@ -7,9 +7,7 @@ import logging
 import time
 from datetime import UTC, datetime
 
-import anthropic
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-
+from planner_agent.agent.base import BaseBrain, BriefingParseError
 from planner_agent.agent.prompts import (
     FEEDBACK_PARSE_PROMPT,
     SUMMARY_UPDATE_PROMPT,
@@ -20,6 +18,7 @@ from planner_agent.config import AppConfig, load_about_me
 from planner_agent.models import (
     DailyBriefing,
     EmailFeedback,
+    FeedbackEntry,
     NewsletterArticle,
     NewsletterReading,
     Phase,
@@ -32,12 +31,40 @@ from planner_agent.state.store import StateStore
 
 logger = logging.getLogger(__name__)
 
-
-class BriefingParseError(Exception):
-    """Raised when Claude's response cannot be parsed as valid briefing JSON."""
+# Re-export for backward compatibility
+__all__ = ["BriefingParseError", "PlannerAgent"]
 
 
 TOOLS = [
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web using multiple search engines (Brave, Tavily, Exa) "
+            "for security training resources, labs, challenges, "
+            "courses, GitHub repos, blog posts, and learning materials. "
+            "Results are deduplicated across all sources for maximum coverage. "
+            "Use this BEFORE assigning any task to find the BEST resource — "
+            "not just the most popular one. Search for specific, precise resources: "
+            "exact lab names, exact challenge titles, exact course modules. "
+            "Run multiple searches with different queries to discover non-obvious, "
+            "underrated resources that will genuinely level up the user's skills."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query. Be specific: "
+                        "'SSRF blind out-of-band lab portswigger' or "
+                        "'prompt injection CTF challenges github 2025' or "
+                        "'advanced deserialization exploit exercises'"
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+    },
     {
         "name": "verify_url",
         "description": (
@@ -78,37 +105,158 @@ TOOLS = [
 ]
 
 
-class PlannerAgent:
+class PlannerAgent(BaseBrain):
+    brain_name = "tactician"
+
     def __init__(self, config: AppConfig, state: StateStore):
-        self.config = config
-        self.state = state
+        super().__init__(config, state)
         self.about_me = load_about_me(config.about_me)
-        self._client = anthropic.Anthropic(
-            api_key=config.llm.api_key,
-            base_url="https://api.anthropic.com",
-        )
 
-    @retry(
-        retry=retry_if_exception_type(anthropic.APIStatusError),
-        wait=wait_exponential(multiplier=1, min=4, max=60),
-        stop=stop_after_attempt(3),
-        reraise=True,
-    )
-    def _call_claude(self, **kwargs):
-        return self._client.messages.create(**kwargs)
+    def _web_search(self, query: str) -> dict:
+        if not self.config.search.enabled:
+            return {"error": "Web search is disabled in config"}
 
-    def _log_usage(self, response, model_name: str) -> None:
-        logger.info(
-            "API usage [%s] — input: %d tokens, output: %d tokens",
-            model_name,
-            response.usage.input_tokens,
-            response.usage.output_tokens,
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        max_results = self.config.search.max_results
+        providers: dict[str, callable] = {}
+
+        if self.config.search.brave.enabled and self.config.search.brave.api_key:
+            providers["brave"] = lambda q=query: self._search_brave(q, max_results)
+        if self.config.search.tavily.enabled and self.config.search.tavily.api_key:
+            providers["tavily"] = lambda q=query: self._search_tavily(q, max_results)
+        if self.config.search.exa.enabled and self.config.search.exa.api_key:
+            providers["exa"] = lambda q=query: self._search_exa(q, max_results)
+
+        if not providers:
+            return {
+                "error": (
+                    "No search providers configured "
+                    "— set BRAVE_API_KEY, TAVILY_API_KEY, or EXA_API_KEY"
+                ),
+            }
+
+        all_results = []
+        sources_used = []
+        errors = {}
+
+        with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+            futures = {executor.submit(fn): name for name, fn in providers.items()}
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    results = future.result()
+                    all_results.extend(results)
+                    sources_used.append(name)
+                except Exception as e:
+                    errors[name] = str(e)
+                    logger.warning("Search provider %s failed: %s", name, e)
+
+        seen_urls: set[str] = set()
+        deduped = []
+        for r in all_results:
+            url = r.get("url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                deduped.append({
+                    "title": r.get("title", ""),
+                    "url": url,
+                    "description": r.get("description", "")[:120],
+                    "source": r.get("source", ""),
+                })
+
+        result: dict = {
+            "query": query,
+            "sources": sources_used,
+            "result_count": len(deduped),
+            "results": deduped,
+        }
+        if errors:
+            result["errors"] = errors
+        return result
+
+    def _search_brave(self, query: str, max_results: int) -> list[dict]:
+        import httpx
+
+        resp = httpx.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": max_results},
+            headers={
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip",
+                "X-Subscription-Token": self.config.search.brave.api_key,
+            },
+            timeout=15,
         )
-        if response.usage.output_tokens > self.config.llm.max_tokens * 0.8:
-            logger.warning(
-                "Output tokens at %.0f%% of max_tokens — consider increasing limit",
-                response.usage.output_tokens / self.config.llm.max_tokens * 100,
-            )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "description": item.get("description", ""),
+                "source": "brave",
+            }
+            for item in data.get("web", {}).get("results", [])
+        ]
+
+    def _search_tavily(self, query: str, max_results: int) -> list[dict]:
+        import httpx
+
+        resp = httpx.post(
+            "https://api.tavily.com/search",
+            json={
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "advanced",
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.config.search.tavily.api_key}",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "description": item.get("content", "")[:300],
+                "score": item.get("score", 0),
+                "source": "tavily",
+            }
+            for item in data.get("results", [])
+        ]
+
+    def _search_exa(self, query: str, max_results: int) -> list[dict]:
+        import httpx
+
+        resp = httpx.post(
+            "https://api.exa.ai/search",
+            json={
+                "query": query,
+                "numResults": max_results,
+                "type": "auto",
+            },
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.config.search.exa.api_key,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "description": item.get("text", "")[:300] if item.get("text") else "",
+                "published_date": item.get("publishedDate", ""),
+                "source": "exa",
+            }
+            for item in data.get("results", [])
+        ]
 
     def _verify_url(self, url: str) -> dict:
         try:
@@ -135,12 +283,20 @@ class PlannerAgent:
                ORDER BY completed_date DESC LIMIT 10""",
             (f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%"),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [
+            {
+                "title": r["title"],
+                "track": r["track"],
+                "learnings": (r["learnings"] or "")[:150],
+                "resource_url": r["resource_url"] or "",
+            }
+            for r in rows
+        ]
 
     def _run_agent_loop(self, context: str) -> str:
         messages: list[dict] = [{"role": "user", "content": context}]
-        max_iterations = 10
-        _api_call_interval = 15
+        max_iterations = 6
+        _api_call_interval = 20
 
         response = None
         _last_call = 0.0
@@ -168,7 +324,9 @@ class PlannerAgent:
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
-                        if block.name == "verify_url":
+                        if block.name == "web_search":
+                            result = self._web_search(**block.input)
+                        elif block.name == "verify_url":
                             result = self._verify_url(**block.input)
                         elif block.name == "search_learnings":
                             result = self._search_learnings(**block.input)
@@ -190,7 +348,29 @@ class PlannerAgent:
                 return final
         raise BriefingParseError("Agent loop exhausted iterations with no text response")
 
-    def generate_briefing(self, target_date: str | None = None) -> DailyBriefing:
+    def _retry_json_extraction(self, failed_text: str) -> dict:
+        """One-shot retry: ask the model to output only valid JSON."""
+        response = self._call_claude(
+            model=self.config.llm.research_model,
+            max_tokens=self.config.llm.max_tokens,
+            system="You are a JSON formatter. Output ONLY valid JSON, nothing else.",
+            messages=[
+                {"role": "user", "content": (
+                    "The following text contains a briefing JSON that may be incomplete "
+                    "or wrapped in markdown. Extract or reconstruct the complete JSON object. "
+                    "Output ONLY the raw JSON — no markdown fences, no explanation.\n\n"
+                    f"{failed_text}"
+                )},
+            ],
+        )
+        self._log_usage(response, self.config.llm.research_model)
+        return self._parse_json_response(response.content[0].text)
+
+    def generate_briefing(
+        self,
+        target_date: str | None = None,
+        directive: dict | None = None,
+    ) -> DailyBriefing:
         """Generate a daily briefing with hyper-specific tasks."""
         now = datetime.now(UTC)
         today = target_date or now.strftime("%Y-%m-%d")
@@ -272,6 +452,7 @@ class PlannerAgent:
             feedback_notes=feedback_notes,
             cumulative_track_stats=cumulative_track_stats,
             learning_summary=learning_summary,
+            directive=directive,
         )
 
         logger.info(
@@ -280,23 +461,56 @@ class PlannerAgent:
         )
 
         raw_text = self._run_agent_loop(context)
-        briefing_data = self._parse_json_response(raw_text)
+        try:
+            briefing_data = self._parse_json_response(raw_text)
+        except BriefingParseError:
+            logger.warning("JSON parse failed — retrying with nudge")
+            briefing_data = self._retry_json_extraction(raw_text)
+
+        active_directive_id = None
+        if directive:
+            active_row = self.state.get_active_directive()
+            if active_row:
+                active_directive_id = active_row.get("id")
 
         tasks = []
         for t in briefing_data.get("tasks", []):
+            raw_milestone = t.get("milestone_id")
+            try:
+                milestone_id = int(raw_milestone) if raw_milestone else None
+            except (ValueError, TypeError):
+                milestone_id = None
+
+            try:
+                task_type = TaskType(t.get("task_type", "other"))
+            except ValueError:
+                task_type = TaskType.OTHER
+
+            try:
+                phase = Phase(t.get("phase", "learn"))
+            except ValueError:
+                phase = Phase.LEARN
+
+            try:
+                priority = Priority(t.get("priority", "medium"))
+            except ValueError:
+                priority = Priority.MEDIUM
+
             tasks.append(Task(
                 title=t.get("title", ""),
                 description=t.get("description", ""),
-                task_type=TaskType(t.get("task_type", "other")),
+                task_type=task_type,
                 track=t.get("track", ""),
-                phase=Phase(t.get("phase", "learn")),
-                priority=Priority(t.get("priority", "medium")),
+                phase=phase,
+                priority=priority,
                 estimated_hours=t.get("estimated_hours", 1.0),
                 resource_url=t.get("resource_url", ""),
                 resource_name=t.get("resource_name", ""),
                 why=t.get("why", ""),
                 status=TaskStatus.PENDING,
                 assigned_date=datetime.fromisoformat(today),
+                milestone_id=milestone_id,
+                directive_id=active_directive_id,
             ))
 
         newsletter_reading = None
@@ -330,7 +544,11 @@ class PlannerAgent:
             newsletter_reading=newsletter_reading,
         )
 
-        self._persist_briefing(briefing)
+        self._persist_briefing(briefing, active_directive_id)
+
+        if directive:
+            self._execute_phase_transitions(directive)
+
         logger.info(
             "Generated %d tasks for %s (%.1fh total, focus: %s/%s)",
             len(tasks), today, briefing.total_estimated_hours,
@@ -361,8 +579,6 @@ class PlannerAgent:
 
         raw_text = response.content[0].text
         feedback_data = self._parse_json_response(raw_text)
-
-        from planner_agent.models import FeedbackEntry
 
         task_updates = []
         for u in feedback_data.get("task_updates", []):
@@ -523,7 +739,9 @@ class PlannerAgent:
         )
         return updated_summary
 
-    def _persist_briefing(self, briefing: DailyBriefing) -> int:
+    def _persist_briefing(
+        self, briefing: DailyBriefing, directive_id: int | None = None,
+    ) -> int:
         all_tasks = list(briefing.tasks)
 
         if briefing.newsletter_reading and briefing.newsletter_reading.articles:
@@ -546,6 +764,7 @@ class PlannerAgent:
                 why="Curated newsletter articles relevant to today's focus.",
                 status=TaskStatus.PENDING,
                 assigned_date=datetime.fromisoformat(briefing.date),
+                directive_id=directive_id,
             )
             all_tasks.append(nr_task)
 
@@ -569,36 +788,21 @@ class PlannerAgent:
             skill_observations=briefing.skill_observations,
             newsletter_topics=briefing.newsletter_topics,
             total_hours=briefing.total_estimated_hours,
+            directive_id=directive_id,
         )
 
         self.state.set_meta("last_briefing_date", briefing.date)
         return briefing_id
 
-    def _parse_json_response(self, text: str) -> dict:
-        """Extract JSON from Claude's response, handling markdown code fences."""
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            start = 1
-            end = len(lines)
-            for i in range(1, len(lines)):
-                if lines[i].strip() == "```":
-                    end = i
-                    break
-            text = "\n".join(lines[start:end])
-
-        try:
-            return json.loads(text, strict=False)
-        except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    return json.loads(text[start:end], strict=False)
-                except json.JSONDecodeError:
-                    pass
-            logger.error("Failed to parse JSON from response: %s", text[:500])
-            raise BriefingParseError(
-                f"Failed to parse briefing JSON from Claude response. "
-                f"Raw text (first 500 chars): {text[:500]}"
-            ) from None
+    def _execute_phase_transitions(self, directive: dict) -> None:
+        """Apply phase transitions from the directive to skill tracks."""
+        transitions = directive.get("phase_transitions", [])
+        for pt in transitions:
+            track_id = pt.get("track_id", "")
+            to_phase = pt.get("to_phase", "")
+            if track_id and to_phase:
+                self.state.update_skill_phase(track_id, to_phase)
+                logger.info(
+                    "Phase transition: %s → %s (%s)",
+                    track_id, to_phase, pt.get("rationale", ""),
+                )

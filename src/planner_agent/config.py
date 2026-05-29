@@ -12,7 +12,9 @@ from pydantic import BaseModel, Field, field_validator
 class LLMConfig(BaseModel):
     model: str = "claude-haiku-4-5"
     research_model: str = "claude-sonnet-4-6"
+    strategic_model: str = "claude-opus-4-8"
     max_tokens: int = 16384
+    strategic_max_tokens: int = 8192
     api_key_env: str = "ANTHROPIC_API_KEY"
 
     @property
@@ -90,6 +92,52 @@ class NewsletterConfig(BaseModel):
     stale_threshold_days: int = 7
 
 
+class SearchConfig(BaseModel):
+    enabled: bool = True
+    max_results: int = 5
+
+    class BraveConfig(BaseModel):
+        enabled: bool = True
+        api_key_env: str = "BRAVE_API_KEY"
+
+        @property
+        def api_key(self) -> str:
+            return os.environ.get(self.api_key_env, "")
+
+    class TavilyConfig(BaseModel):
+        enabled: bool = True
+        api_key_env: str = "TAVILY_API_KEY"
+
+        @property
+        def api_key(self) -> str:
+            return os.environ.get(self.api_key_env, "")
+
+    class ExaConfig(BaseModel):
+        enabled: bool = True
+        api_key_env: str = "EXA_API_KEY"
+
+        @property
+        def api_key(self) -> str:
+            return os.environ.get(self.api_key_env, "")
+
+    brave: BraveConfig = BraveConfig()
+    tavily: TavilyConfig = TavilyConfig()
+    exa: ExaConfig = ExaConfig()
+
+
+class BrainConfig(BaseModel):
+    enabled: bool = True
+    model_override: str | None = None
+    auto_trigger: bool = True
+
+
+class BrainsConfig(BaseModel):
+    strategist: BrainConfig = BrainConfig()
+    critic: BrainConfig = BrainConfig()
+    analyst: BrainConfig = BrainConfig()
+    scout: BrainConfig = BrainConfig(auto_trigger=False)
+
+
 class AppConfig(BaseModel):
     about_me: str = "AboutMe.md"
     llm: LLMConfig = LLMConfig()
@@ -98,6 +146,8 @@ class AppConfig(BaseModel):
     schedule: ScheduleConfig = ScheduleConfig()
     time_budget: TimeBudgetConfig = TimeBudgetConfig()
     newsletter: NewsletterConfig = NewsletterConfig()
+    search: SearchConfig = SearchConfig()
+    brains: BrainsConfig = BrainsConfig()
     tracks: dict[str, TrackConfig] = Field(default_factory=lambda: {
         "web_appsec": TrackConfig(
             name="Web Application Security",

@@ -31,7 +31,10 @@ TASK_TYPE_ICONS = {
 }
 
 
-def render_briefing_html(briefing: DailyBriefing) -> str:
+def render_briefing_html(
+    briefing: DailyBriefing,
+    directive: dict | None = None,
+) -> str:
     phase_label, phase_color, phase_bg = PHASE_LABELS.get(
         briefing.focus_phase, ("LEARN", "#6366f1", "#eef2ff")
     )
@@ -41,6 +44,7 @@ def render_briefing_html(briefing: DailyBriefing) -> str:
     gaps_html = _render_gaps(briefing)
     observations_html = _render_observations(briefing)
     newsletter_html = _render_newsletter(briefing)
+    directive_html = _render_directive_banner(directive)
 
     return f"""\
 <!DOCTYPE html>
@@ -107,6 +111,9 @@ def render_briefing_html(briefing: DailyBriefing) -> str:
       {briefing.focus_rationale}
     </p>
   </td></tr>
+
+  <!-- Directive Banner -->
+  {directive_html}
 
   <!-- Tasks Header -->
   <tr><td style="padding:24px 32px 12px 32px;">
@@ -430,6 +437,107 @@ def _render_observations(briefing: DailyBriefing) -> str:
     </table>
   </td></tr>
 </table>"""
+
+
+def _render_directive_banner(directive: dict | None) -> str:
+    if not directive:
+        return ""
+
+    theme = directive.get("weekly_theme", "")
+    focus = directive.get("strategic_focus", "")
+    if not theme and not focus:
+        return ""
+
+    targets = directive.get("targets", [])
+    alerts = directive.get("alerts", [])
+    constraints = directive.get("constraints", [])
+
+    targets_html = ""
+    for t in targets[:4]:
+        track = t.get("track_id", "").replace("_", " ").title()
+        hours = t.get("hours_allocated", 0)
+        rank = t.get("priority_rank", 0)
+        phase = t.get("phase", "learn").upper()
+        objectives = t.get("objectives", [])
+        obj_text = objectives[0] if objectives else ""
+        if len(obj_text) > 80:
+            obj_text = obj_text[:77] + "..."
+        targets_html += f"""
+            <tr><td style="padding:4px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0fdf4;border-radius:6px;">
+                <tr><td style="padding:8px 12px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-size:13px;font-weight:600;color:#166534;">#{rank} {track}</td>
+                      <td align="right">
+                        <span style="font-size:11px;color:#15803d;font-weight:600;">{phase}</span>
+                        <span style="font-size:11px;color:#6b7280;padding-left:6px;">{hours}h</span>
+                      </td>
+                    </tr>
+                  </table>
+                  <p style="margin:4px 0 0 0;font-size:12px;color:#4b5563;line-height:1.4;">{obj_text}</p>
+                </td></tr>
+              </table>
+            </td></tr>"""
+
+    alerts_html = ""
+    for a in alerts[:3]:
+        severity = a.get("severity", "info").upper()
+        msg = a.get("message", "")
+        sev_color = {"CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#2563eb"}.get(severity, "#6b7280")
+        alerts_html += f"""
+            <tr><td style="padding:3px 0;">
+              <span style="font-size:10px;font-weight:700;color:{sev_color};padding-right:6px;">{severity}</span>
+              <span style="font-size:12px;color:#374151;">{msg}</span>
+            </td></tr>"""
+
+    constraints_html = ""
+    for c in constraints[:3]:
+        constraints_html += f"""
+            <tr><td style="padding:3px 0;">
+              <span style="font-size:12px;color:#92400e;">⚡ {c}</span>
+            </td></tr>"""
+
+    extra_sections = ""
+    if alerts_html:
+        extra_sections += f"""
+          <tr><td style="padding:10px 0 0 0;">
+            <p style="margin:0 0 4px 0;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Alerts</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">{alerts_html}</table>
+          </td></tr>"""
+    if constraints_html:
+        extra_sections += f"""
+          <tr><td style="padding:10px 0 0 0;">
+            <p style="margin:0 0 4px 0;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Constraints</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">{constraints_html}</table>
+          </td></tr>"""
+
+    return f"""
+  <tr><td style="padding:0 32px 8px 32px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;">
+      <tr><td style="padding:16px 20px 8px 20px;border-bottom:1px solid #bbf7d0;">
+        <p style="margin:0;font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:1.5px;">
+          \U0001f3af Weekly Directive
+        </p>
+        <p style="margin:6px 0 0 0;font-size:16px;font-weight:700;color:#166534;line-height:1.3;">
+          {theme}
+        </p>
+        <p style="margin:4px 0 8px 0;font-size:13px;color:#4b5563;line-height:1.5;">
+          {focus}
+        </p>
+      </td></tr>
+      <tr><td style="padding:12px 20px 16px 20px;">
+        <p style="margin:0 0 6px 0;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">
+          Weekly Targets
+        </p>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          {targets_html}
+        </table>
+        {extra_sections}
+      </td></tr>
+    </table>
+  </td></tr>"""
 
 
 def _render_newsletter(briefing: DailyBriefing) -> str:

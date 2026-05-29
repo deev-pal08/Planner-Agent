@@ -1,31 +1,65 @@
 # Planner Agent
 
-Adaptive daily task orchestrator for security career growth. Reads your current skill state, generates hyper-specific daily tasks using a Claude agent loop with tool use, delivers styled HTML briefings via email, parses natural-language feedback from your replies, and adapts future plans based on accumulated progress.
+Multi-brain adaptive career planning agent for security career growth. Five specialized AI brains operate at different time horizons — strategic (weekly), tactical (daily), analytical (per-feedback), critical (weekly review), and discovery (periodic). All brains auto-coordinate through a single command.
 
 ## How It Works
 
-1. **Reads your state** from SQLite — skill tracks, completed tasks, skip patterns, feedback notes, portfolio gaps, newsletter articles, cumulative track stats, and a rolling learning summary
-2. **Generates** hyper-specific daily tasks via a Claude Sonnet agent loop — verifies every resource URL is live and extracts actual page titles, searches your past learnings to avoid repeats, names exact lab titles, paper URLs, challenge names, and rationale for each task
-3. **Delivers** a styled HTML briefing email via Resend with priority-colored task cards, newsletter reading block, portfolio gap alerts, and skill observations
-4. **Receives feedback** via email reply — you reply naturally ("Done 1 and 3. Skipped 2 — too dense. Spent 3h total.") or with detailed paragraphs about what you learned
-5. **Parses feedback** via Claude Haiku into structured task updates, shows parsed results for confirmation before writing to the database
-6. **Updates long-term memory** — Claude Haiku maintains a rolling learning summary capturing your preferences, difficulty calibration, and key insights across all time
-7. **Adapts** — the next briefing sees your accumulated progress, long-term memory, and recent feedback, then adjusts difficulty, focus track, task types, and phase progression accordingly
+```
+planner daily → Orchestrator auto-runs needed brains:
 
+┌──────────┐   ┌──────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│  Analyst  │──▶│  Scout   │──▶│    Critic    │──▶│  Strategist  │──▶│  Tactician   │
+│ Bootstrap │   │ (Haiku)  │   │  (Sonnet)    │   │   (Opus)     │   │  (Sonnet)    │
+│ (Haiku)   │   │ if stale │   │ if new week  │   │ if no dir.   │   │   always     │
+└──────────┘   └──────────┘   └──────────────┘   └──────────────┘   └──────────────┘
+    once         every 3d       before strategist    weekly              daily
+
+                                                                          │
+                                                                    HTML email sent
+                                                                          │
+                                                                You reply with progress
+                                                                          │
+                                                              planner process-replies
+                                                                          │
+                                                            Analyst updates profile
+                                                                          │
+                                                          Next run sees updated state
+                                                              and all brains adapt
 ```
-planner daily → Claude agent loop → verifies URLs → searches learnings
-                    → generates tasks → HTML email sent
-                                                        ↓
-                                               You reply with progress
-                                                        ↓
-planner process-replies → Claude Haiku parses reply → shows parsed feedback
-                    → you confirm → updates DB (tasks, skills, hours)
-                    → updates rolling learning summary (long-term memory)
-                                                        ↓
-                                        Next planner daily sees updated state,
-                                    cumulative stats, and learning summary —
-                                             and adapts accordingly
-```
+
+## The Five Brains
+
+| Brain | Model | When | What It Does |
+|-------|-------|------|-------------|
+| **Strategist** | Opus | Weekly | Reads goals, milestones, Critic review, opportunities → produces a binding weekly directive with per-track hour allocations, phase transitions, and constraints |
+| **Tactician** | Sonnet | Daily | Reads directive → searches the web for specific resources → generates hyper-specific daily tasks linked to milestones |
+| **Critic** | Sonnet | Weekly | Reviews planned vs actual — grades A-F, per-track trajectory, milestone confidence, strategic recommendations |
+| **Analyst** | Haiku | After feedback | Maintains structured competence profile — per-track skill levels, learning velocity, engagement patterns, phase readiness |
+| **Scout** | Haiku | Every 3 days | Searches the web for real upcoming CTFs, conference CFPs, bug bounty programs, training events with deadlines |
+
+## Research-First Task Generation
+
+The Tactician doesn't rely on training data for resource names or URLs. It runs a strict 4-turn agent loop:
+
+1. **search_learnings** — checks what you've already studied (prevents repeats)
+2. **web_search** — multi-source search via Brave, Tavily, and Exa APIs in parallel, finds specific resources from any platform
+3. **verify_url** — verifies every URL is live, extracts actual page title
+4. **Output JSON** — composes the final task list with verified resources
+
+Tasks come from any platform — PentesterLab, HackTheBox, TryHackMe, PortSwigger, picoCTF, CryptoHack, HackerOne, Bugcrowd, GitHub repos, arxiv papers, conference workshops, and anything else the search discovers.
+
+## Task Specificity
+
+Every task is specific enough to start immediately:
+
+**Unacceptable:**
+- "Complete 2 SSRF labs on PentesterLab"
+- "Read articles about prompt injection"
+
+**Required:**
+- "Complete PentesterLab exercise 'Server Side Request Forgery' (https://pentesterlab.com/exercises/server_side_request_forgery) — covers cloud metadata endpoint exploitation. This builds on last week's basic SSRF module."
+- "Solve picoCTF challenge 'Web Gauntlet 3' (300 points, Web Exploitation) — SQLi filter bypass challenge. Practice crafting payloads that evade WAF rules."
+- "Start bug bounty on HackerOne program 'Acronis' — focus on IDOR in their cloud management API endpoints."
 
 ## Skill Progression
 
@@ -37,262 +71,143 @@ Every skill track follows a three-phase learning loop:
 | **Practice** | Labs, CTFs, bug bounty, code review | Complete PentesterLab SSRF exercise, solve HackTheBox machine |
 | **Produce** | CVEs, research papers, talks, tools | Disclose a CVE, submit a conference CFP, publish a security tool |
 
-Phase transitions are Claude's judgment call based on hours invested, breadth of topics covered, quality of learnings noted, and completion consistency — not a fixed item count.
+Phase transitions are decided by the Strategist based on the Analyst's competence assessment and Critic's trajectory analysis — not arbitrary item counts.
 
-## Agent Loop and Tools
+## Goal → Task Traceability
 
-Unlike a simple prompt-and-respond setup, the briefing generator runs as a multi-turn agent loop with two tools:
-
-| Tool | Purpose | How it works |
-|------|---------|--------------|
-| `verify_url` | Checks if a resource URL is live and gets the real title | GET request via httpx, extracts `<title>` tag, follows redirects, 10s timeout |
-| `search_learnings` | Searches your past task learnings | SQLite LIKE query against completed task titles and learnings |
-
-Claude calls `search_learnings` before assigning tasks to check what you've already studied, and calls `verify_url` on every resource URL before including it in a task. Dead links are replaced with alternatives. The returned page title is used as the task title — Claude never uses titles from its own memory, which may be outdated or wrong. The loop runs up to 10 iterations before extracting the final JSON output.
+```
+Goals (6-9 month objectives)
+  └── Milestones (intermediate targets with deadlines)
+        └── Strategic Directive (weekly plan with hour allocations)
+              └── Daily Tasks (specific, verified, linked to milestones)
+```
 
 ## Newsletter Integration
 
-Reads articles from the [Newsletter Agent](https://github.com/deev-pal08/newsletter-agent)'s SQLite database (read-only, `?mode=ro`). Newsletter articles appear as a single reading block at the end of the briefing, separate from Claude's generated tasks. Articles you've already completed (matched by URL against done tasks) are automatically excluded.
-
-- Graceful degradation: if the newsletter DB is missing or unreadable, the briefing generates normally
-- Each Newsletter Agent run costs ~$5-6 — the Planner never runs it, only suggests topic searches when coverage gaps exist
-- Articles are grouped by priority (CRITICAL, IMPORTANT, INTERESTING, REFERENCE) with configurable caps
+Reads articles from the [Newsletter Agent](https://github.com/deev-pal08/newsletter-agent)'s SQLite database (read-only). Newsletter articles appear as a reading block (5-10 articles per briefing) at the end of each email. Articles you've already completed are automatically excluded.
 
 ## Prerequisites
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
-- [Anthropic API key](https://console.anthropic.com/) for task generation and feedback parsing
-- [Resend API key](https://resend.com/) for email delivery (free tier: 100 emails/day)
+- [Anthropic API key](https://console.anthropic.com/) for all brains
+- [Resend API key](https://resend.com/) for email delivery
+- [Brave Search API key](https://brave.com/search/api/) for web search
+- [Tavily API key](https://tavily.com/) for web search (optional)
+- [Exa API key](https://exa.ai/) for web search (optional)
 - Gmail account with [App Password](https://support.google.com/accounts/answer/185833) for IMAP reply polling
 
 ## Quick Start
 
 ```bash
-# 1. Install uv (if not already installed)
+# 1. Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Clone the repo
+# 2. Clone and install
 git clone https://github.com/deev-pal08/Planner-Agent.git
 cd Planner-Agent
-
-# 3. Install dependencies
 uv sync
 
-# 4. Set up your profile
-cp AboutMe.example.md AboutMe.md
-# Edit AboutMe.md — your skills, experience, goals, and honest self-assessment
+# 3. Configure
+cp AboutMe.example.md AboutMe.md    # Edit with your profile
+cp config.example.yaml config.yaml  # Edit email, time budget, tracks
+cp .env.example .env                # Fill in API keys
 
-# 5. Set up your config
-cp config.example.yaml config.yaml
-# Edit config.yaml — email addresses, time budget, skill tracks
+# 4. Initialize and run
+uv run planner init                 # Set up skill tracks
+uv run planner daily --no-email     # Preview first briefing
+uv run planner daily                # Send for real
 
-# 6. Set up API keys
-cp .env.example .env
-# Fill in: ANTHROPIC_API_KEY, RESEND_API_KEY, IMAP_EMAIL, IMAP_PASSWORD
-
-# 7. Initialize skill tracks
-uv run planner init
-
-# 8. Preview your first briefing
-uv run planner daily --no-email
-
-# 9. Send for real
-uv run planner daily
-
-# 10. Reply to the email with your progress, then:
-uv run planner process-replies
-
-# 11. (Optional) Install daily schedule
-uv run planner install-schedule --time 07:00
+# 5. Feedback loop
+uv run planner process-replies      # Parse email reply, update state
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `planner daily` | Generate briefing + send email |
+| `planner daily` | Full cycle: all brains auto-trigger → email |
 | `planner daily --no-email` | Generate briefing, print to terminal only |
-| `planner daily --force` | Regenerate even if a briefing already exists for today |
-| `planner daily --date 2026-05-22` | Generate briefing for a specific date |
-| `planner process-replies` | Parse latest email reply, show feedback, confirm, update state |
-| `planner process-replies --yes` | Skip confirmation prompt (for automation/cron) |
-| `planner briefing` | Generate briefing (no email) |
-| `planner briefing --force` | Regenerate briefing for today |
-| `planner complete <task_id>` | Mark task done via CLI |
-| `planner skip <task_id>` | Mark task skipped via CLI |
-| `planner status` | Show progress across all tracks |
-| `planner portfolio` | Show portfolio status and gaps |
+| `planner daily --force` | Regenerate even if briefing exists for today |
+| `planner process-replies` | Parse email reply, confirm, update state + analyst |
+| `planner process-replies --yes` | Skip confirmation (for automation/cron) |
+| `planner complete <id>` | Mark task done via CLI (triggers Analyst) |
+| `planner skip <id>` | Mark task skipped (triggers Analyst) |
+| `planner status` | Goals, milestones, directive, skills, profile, API usage |
+| `planner portfolio` | Portfolio status and gaps |
 | `planner log-achievement` | Record a CVE, paper, talk, etc. |
-| `planner init` | Initialize skill tracks from config |
 | `planner history` | Show recent completed tasks |
 | `planner install-schedule` | Install daily launchd/cron job |
-| `planner install-schedule --uninstall` | Remove installed schedule |
 
-All commands are prefixed with `uv run` (e.g., `uv run planner daily`).
+All commands are prefixed with `uv run`.
 
 ## Configuration
 
 Copy `config.example.yaml` to `config.yaml` and customize:
 
-- **about_me**: Path to your `AboutMe.md` profile
-- **llm.model**: `claude-haiku-4-5` for feedback parsing (cheap, fast)
-- **llm.research_model**: `claude-sonnet-4-6` for briefing generation (smarter)
-- **llm.max_tokens**: Output token limit for briefing generation (default: 16384)
+- **llm.model**: `claude-haiku-4-5` for feedback parsing, analyst, scout
+- **llm.research_model**: `claude-sonnet-4-6` for tactician and critic
+- **llm.strategic_model**: `claude-opus-4-8` for strategist
 - **email**: Resend delivery settings (from/to addresses)
 - **imap**: Gmail IMAP settings for reply polling
-- **schedule**: Daily briefing time (must be HH:MM format) and timezone
 - **time_budget**: Available hours per weekday/weekend
-- **newsletter**: Newsletter Agent project directory and stale threshold
-- **tracks**: Skill tracks with name, starting phase, and priority
+- **brains**: Enable/disable each brain, model overrides
+- **search**: Web search providers (brave, tavily, exa) with per-provider enable/disable
+- **newsletter**: Newsletter Agent project directory
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API for briefing generation and feedback parsing |
+| `ANTHROPIC_API_KEY` | Yes | Claude API for all brains |
 | `RESEND_API_KEY` | Yes | Resend API for email delivery |
+| `BRAVE_API_KEY` | Yes | Brave Search API for web search |
+| `TAVILY_API_KEY` | No | Tavily API for web search (optional, adds depth) |
+| `EXA_API_KEY` | No | Exa API for neural/semantic search (optional) |
 | `IMAP_EMAIL` | Yes | Gmail address for IMAP reply polling |
 | `IMAP_PASSWORD` | Yes | Gmail App Password for IMAP login |
-| `IMAP_SERVER` | No | IMAP server (default: `imap.gmail.com`) |
 
 All keys are stored in `.env` (gitignored) and auto-loaded via python-dotenv.
-
-## User Profile (AboutMe.md)
-
-The `AboutMe.md` file tells the agent who you are. It's injected into Claude's briefing prompt so tasks are personalized to your background:
-
-- **Who I Am** — role, company, career level
-- **Skills & Expertise** — current abilities with honest ratings
-- **Experience** — professional background, notable achievements
-- **Learning Goals** — what you're working toward (promotion, visa, certifications)
-- **Skill Tracks** — specific domains to develop, with current phase and priority
-
-## Adaptive Feedback Loop
-
-The agent adapts through accumulated state, not hardcoded rules:
-
-| Signal | What Claude sees | How it adapts |
-|--------|-----------------|---------------|
-| Hours invested per track | `ai_security: 12.5h, web_appsec: 3.0h` | Balances focus across tracks |
-| Completion rate | `18/22 tasks done (82%)` | Adjusts task count and difficulty |
-| Skip patterns | `web_appsec/lab skipped 4 times` | Flags the pattern, may switch resource types |
-| Learnings noted | `"TOCTOU races need two operations on same resource"` | Gauges comprehension depth |
-| Feedback notes | `"SSRF lab too basic, already know cloud metadata"` | Avoids repeating rejected material |
-| Portfolio gaps | `0 research papers, 0 CVEs` | Prioritizes tracks that close gaps |
-| Past learnings (via tool) | `search_learnings("JWT")` → prior work found | Assigns advanced material, not basics |
-| Newsletter coverage | `13 unread articles, 0 on AI security` | Suggests newsletter agent searches for missing topics |
-| **Cumulative track stats** | `web_appsec: 72% completion, 9 skipped, last active 17 days ago` | Detects stale tracks, adjusts based on all-time patterns |
-| **Learning summary** | `"SSRF basics too easy, prefers papers over videos, ready for practice phase"` | Calibrates difficulty and resource types using all historical feedback |
-
-## Long-Term Memory
-
-The agent maintains two layers of long-term memory that persist across all briefings, ensuring task quality doesn't degrade as data accumulates over months:
-
-### Cumulative Track Stats (SQL, $0/day)
-
-All-time per-track statistics computed directly from the database:
-- Tasks completed and skipped with completion rate
-- Total hours invested
-- Most common task types (read, lab, ctf, etc.)
-- First and last active dates (detects stale tracks)
-
-### Rolling Learning Summary (Claude Haiku, ~$0.001/day)
-
-An ~800-word summary maintained by Claude Haiku that captures signals the raw data can't express:
-- **Difficulty calibration**: "SSRF basics too easy — skip beginner labs"
-- **Resource preferences**: "Prefers papers over videos, engages best with PortSwigger research-level content"
-- **Skip reasons**: "Skips writing tasks consistently — may need smaller scope"
-- **Key learnings**: "Strong grasp of prompt injection taxonomy, understands indirect PI variants"
-- **Phase readiness**: "Ready for ai_security practice phase as of week 8"
-
-The summary is updated after every `process-replies`, `complete` (with notes), and `skip` (with reason). It's stored in the `meta` table and injected into every future briefing prompt — so feedback you give on day 3 still influences tasks assigned on day 180.
-
-## Task Specificity Rule
-
-Every generated task must be specific enough to start immediately. The system prompt enforces this:
-
-**Unacceptable:**
-- "Complete 2 SSRF labs on PentesterLab"
-- "Read articles about prompt injection"
-
-**Required:**
-- "Complete PentesterLab exercise 'Server Side Request Forgery' (https://pentesterlab.com/exercises/server_side_request_forgery) — covers cloud metadata endpoint exploitation. This builds on last week's basic SSRF module."
-- "Read 'Not what you've signed up for' by Greshake et al. (https://arxiv.org/abs/2302.12173) — foundational prompt injection paper. Focus on Section 3: indirect prompt injection threat model."
-
-Every URL is verified live via the `verify_url` tool before being included in a task.
 
 ## Project Structure
 
 ```
 src/planner_agent/
 ├── cli.py               # Click CLI — all commands
-├── config.py            # Pydantic config validation with field validators
-├── models.py            # Pydantic models (Task, Skill, Achievement, NewsletterReading)
+├── config.py            # Pydantic config with brain settings
+├── models.py            # All Pydantic models (resilient to LLM output variations)
 ├── scheduling.py        # launchd/cron scheduling
 ├── agent/
-│   ├── loop.py          # Claude API agent loop — tools, retry, token logging, summary updates
-│   └── prompts.py       # System prompt, summary prompt, context builder
+│   ├── orchestrator.py  # Single entry point, auto-coordinates all brains
+│   ├── base.py          # BaseBrain — shared API call logic, retry, cost tracking
+│   ├── loop.py          # Tactician — agent loop with web search + tools
+│   ├── strategist.py    # Strategist — weekly directive from Opus
+│   ├── critic.py        # Critic — weekly review
+│   ├── analyst.py       # Analyst — competence assessment
+│   ├── scout.py         # Scout — opportunity discovery via web search
+│   ├── tools.py         # Shared tool implementations
+│   └── prompts/         # Prompt modules for each brain
 ├── email/
-│   ├── sender.py        # Resend API email sender (briefing + plain-text fallback)
-│   ├── receiver.py      # IMAP reply polling (dynamic lookback)
-│   └── templates.py     # HTML email template rendering
+│   ├── sender.py        # Resend sender (briefing + fallback)
+│   ├── receiver.py      # IMAP reply polling
+│   └── templates.py     # HTML email templates
 └── state/
-    ├── store.py         # SQLite state manager
+    ├── store.py         # SQLite state manager (auto-migration)
     └── newsletter.py    # Read-only Newsletter Agent DB reader
-```
-
-## Database Schema
-
-All state lives in `data/planner.db` (SQLite, WAL mode):
-
-| Table | Purpose |
-|-------|---------|
-| `skills` | Skill tracks with phase, priority, hours invested, items completed |
-| `tasks` | All assigned tasks with status, time estimates, resource URLs, learnings |
-| `achievements` | Portfolio items — CVEs, papers, talks, Hall of Fames, etc. |
-| `daily_briefings` | Briefing history with full tasks JSON and email message IDs |
-| `feedback_log` | All feedback received (email or CLI) with notes and learnings |
-| `meta` | Key-value metadata (last briefing date, rolling learning summary, etc.) |
-
-## Architecture
-
-- **Agent loop with tools**: Claude Sonnet runs a multi-turn loop (up to 10 iterations) with `verify_url` and `search_learnings` tools. URLs are verified live with page title extraction; past learnings are searched to avoid repeating material.
-- **Two models**: Claude Sonnet for briefing generation (needs reasoning + tool use), Claude Haiku for feedback parsing and learning summary updates (cheap, fast)
-- **Long-term memory**: Cumulative track stats (SQL-computed, all-time) and a rolling learning summary (Claude Haiku-maintained, ~800 words) are injected into every briefing prompt. The summary captures difficulty preferences, resource type preferences, skip reasons, key learnings, and phase readiness signals — ensuring day 180 is as well-calibrated as day 1.
-- **Retry logic**: All API calls wrapped with tenacity — 3 attempts with exponential backoff on transient errors
-- **Token logging**: Input/output token counts logged after every API call; warning when output tokens exceed 80% of `max_tokens`
-- **Dedup protection**: Same-day briefing runs blocked unless `--force` passed; stale pending tasks cleaned on force
-- **Feedback confirmation**: `process-replies` shows parsed feedback and prompts for confirmation before writing to DB; `--yes` bypasses for automation
-- **Fallback email**: If briefing generation fails, a plain-text notification email is sent with error details and last known state
-- **Separation of concerns**: Agent generates tasks → Templates render HTML → Sender delivers → Receiver polls → Agent parses feedback → Store persists state
-- **Newsletter integration**: Read-only access to a separate project's SQLite DB. Newsletter articles are rendered as a single reading block (last task) and persisted as a real Task so the feedback loop tracks them.
-- **Graceful degradation**: Missing newsletter DB, IMAP failures, and email send errors don't block briefing generation
-- **No frameworks**: Raw Anthropic SDK + Pydantic + SQLite. The intelligence is in the prompts.
-
-## Scheduling
-
-Install a daily schedule with one command:
-
-| OS | Method |
-|----|--------|
-| macOS | LaunchAgent (plist) via `launchctl` |
-| Linux | crontab |
-
-```bash
-uv run planner install-schedule --time 07:00
-uv run planner install-schedule --uninstall
 ```
 
 ## Cost
 
-| Service | Per run | Notes |
-|---------|---------|-------|
-| Claude Sonnet (briefing) | ~$0.03-0.05 | Agent loop with tool calls (typically 3-4 API turns) |
-| Claude Haiku (feedback) | ~$0.001 | 1 API call per reply parsed |
-| Claude Haiku (summary) | ~$0.001 | 1 API call to update rolling learning summary |
+| Brain | Per run | Notes |
+|-------|---------|-------|
+| Strategist (Opus) | ~$0.16 | 1 call/week |
+| Tactician (Sonnet) | ~$0.04 | 4-turn agent loop/day |
+| Critic (Sonnet) | ~$0.03 | 1 call/week |
+| Scout (Haiku) | ~$0.01 | 3-turn agent loop every 3 days |
+| Analyst (Haiku) | ~$0.003 | 1 call per feedback event |
+| Feedback parsing (Haiku) | ~$0.001 | 1 call per reply |
 
-Total: ~$0.03-0.05 per daily cycle (briefing + feedback + summary update).
+**Estimated weekly cost: ~$0.50**
 
 ## Tests
 
@@ -300,10 +215,7 @@ Total: ~$0.03-0.05 per daily cycle (briefing + feedback + summary update).
 uv run pytest tests/ -v
 ```
 
-| Test file | Tests | What it covers |
-|-----------|-------|----------------|
-| `tests/test_store.py` | 5 | Task CRUD, status updates, skill hour accumulation, feedback notes retrieval, briefing dedup |
-| `tests/test_loop.py` | 4 | JSON parsing (clean, markdown-fenced, invalid input, empty input) |
+91 tests across 10 test files covering all brains, database operations, schema migration, web search, email templates, and end-to-end integration.
 
 ## License
 
