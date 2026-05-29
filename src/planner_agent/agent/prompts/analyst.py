@@ -14,7 +14,12 @@ Produce an UPDATED profile as JSON.
 - **learning_velocity**: tasks completed per week (computed from dates)
 - **preferred_resource_types**: which formats the user engages with best
 - **difficulty_calibration**: is current material appropriate, too easy, or too hard?
-- **phase_readiness**: evidence-based assessment of readiness for next phase
+- **phase_readiness**: evidence-based assessment of readiness for next phase. \
+The mastery loop is learn→examples→practice→execute. Assess whether the user has \
+demonstrated enough depth in the current phase to advance: \
+learn→examples requires mastery of foundational theory, \
+examples→practice requires extensive real-world report reading, \
+practice→execute requires demonstrated hands-on competence
 - **skip_patterns**: reasons for skipping (not just counts)
 - **key_learnings**: concepts the user has demonstrably internalized
 
@@ -40,7 +45,7 @@ Return a JSON object matching this schema:
       "learning_velocity": 4.0,
       "preferred_resource_types": ["papers", "newsletters"],
       "difficulty_calibration": "Current material is appropriately challenging",
-      "phase_readiness": "Ready for practice phase based on...",
+      "phase_readiness": "Ready for examples phase based on...",
       "skip_patterns": [],
       "key_learnings": ["Understanding of indirect vs direct prompt injection"],
       "resource_quality_notes": ["embracethered.com articles are high quality"]

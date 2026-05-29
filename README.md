@@ -61,15 +61,18 @@ Every task is specific enough to start immediately:
 - "Solve picoCTF challenge 'Web Gauntlet 3' (300 points, Web Exploitation) — SQLi filter bypass challenge. Practice crafting payloads that evade WAF rules."
 - "Start bug bounty on HackerOne program 'Acronis' — focus on IDOR in their cloud management API endpoints."
 
-## Skill Progression
+## Skill Progression — The 4-Phase Mastery Loop
 
-Every skill track follows a three-phase learning loop:
+Every skill track follows a strict 4-phase learning loop. Each phase has a mastery gate — no phase is ever skipped. This loop is built on a proven methodology that produced $4k in 3 months from bug bounty.
 
 | Phase | What you do | Examples |
 |-------|-------------|---------|
-| **Learn** | Papers, articles, videos, courses | Read Greshake et al. prompt injection paper, watch LiveOverflow talk |
-| **Practice** | Labs, CTFs, bug bounty, code review | Complete PentesterLab SSRF exercise, solve HackTheBox machine |
-| **Produce** | CVEs, research papers, talks, tools | Disclose a CVE, submit a conference CFP, publish a security tool |
+| **Learn** | Drain ALL foundational sources until the topic is internalized | HackTricks, PortSwigger Web Security Academy, OWASP guides, official docs, YouTube tutorials, cheat sheets, courses |
+| **Examples** | Read extensive real-world reports — see how attacks manifest in production | HackerOne Hacktivity, bug bounty writeups, CVE analyses, Medium security articles, disclosed bug reports, conference case studies |
+| **Practice** | Hands-on exercises — build muscle memory | PentesterLab, HackTheBox, TryHackMe, PortSwigger labs, picoCTF, CryptoHack, OverTheWire, OWASP WebGoat |
+| **Execute** | Apply skills on real targets — produce portfolio items | Bug bounty hunting (HackerOne, Bugcrowd), real code audits, CVE advisories, security tools, research papers, conference talks |
+
+**Depth over breadth.** Master one topic through all 4 phases rather than spreading thin across many topics in the learn phase. Read 100s of articles on a single topic before advancing.
 
 Phase transitions are decided by the Strategist based on the Analyst's competence assessment and Critic's trajectory analysis — not arbitrary item counts.
 

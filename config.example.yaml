@@ -73,7 +73,7 @@ brains:
     auto_trigger: true  # set false to disable periodic opportunity discovery
 
 # Skill tracks — all start at "learn" phase
-# Phase progression: learn → practice → produce (decided by Strategist)
+# Phase progression: learn → examples → practice → execute (decided by Strategist)
 tracks:
   web_appsec:
     name: "Web Application Security"

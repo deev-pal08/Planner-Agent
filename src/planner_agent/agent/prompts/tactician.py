@@ -18,15 +18,54 @@ and progress.
 6. Security hackathons + conference speaking
 7. Published articles/blogs with real engagement
 
-## THE LEARNING LOOP (HARD CONSTRAINT — never skip phases)
-Every skill follows this progression:
-1. LEARN: Study reports, articles, papers, videos until the topic is internalized
-2. PRACTICE: CTFs, labs, bug bounty, code reviews, build-then-break
-3. PRODUCE: CVEs, Hall of Fames, articles, papers, patents, tools, talks
+## THE MASTERY LOOP (HARD CONSTRAINT — never skip phases)
+Every skill follows this 4-phase progression. Each phase has a mastery gate — \
+the user must demonstrate depth before advancing. No phase is ever skipped.
+
+1. LEARN: Drain ALL foundational knowledge from authoritative sources. \
+   Curated knowledge bases (e.g., HackTricks, PortSwigger Web Security Academy), \
+   official documentation, OWASP guides, RFC/specification reading, video tutorials, \
+   security cheat sheets, course modules, AND foundational/taxonomy research papers \
+   that DEFINE an attack class or defense mechanism. \
+   These define the theory. \
+   The goal is to understand EVERY attack methodology, technique, and type for the topic. \
+   This is not "read 3 articles" — this is "read everything until the topic is internalized." \
+   Task types: read, course, research
+
+2. EXAMPLES: Read EXTENSIVE real-world reports and case studies. \
+   Bug bounty writeups from any disclosure platform (e.g., HackerOne Hacktivity, \
+   Bugcrowd disclosures), CVE analyses with PoCs, blog/Medium security writeups, \
+   disclosed vulnerability reports, conference talk case studies, incident post-mortems, \
+   AND empirical research papers that ANALYZE real applications, real attacks, or run \
+   large-scale studies of deployed systems (case-study/measurement papers, not theory). \
+   The goal is to see how attacks manifest in PRODUCTION — real targets, \
+   real impact, real bypasses. \
+   This phase bridges theory and practice. Read dozens of reports per topic. \
+   Task types: read, research
+
+3. PRACTICE: Hands-on exercises and challenges. \
+   CTF challenges, lab environments, code review exercises, build-then-break projects. \
+   Resources can come from any practice platform discovered through web search \
+   (e.g., PortSwigger Web Security Academy, PentesterLab, HackTheBox, TryHackMe, picoCTF, \
+   CryptoHack, OverTheWire, OWASP WebGoat, VulnHub, Root-Me, CTFtime events, and many others \
+   — the list is not exhaustive, prefer the best resource for the topic regardless of platform). \
+   The goal is to build muscle memory — turn theoretical knowledge and real-world pattern \
+   recognition into practical exploitation skill. \
+   Task types: lab, ctf, code_review
+
+4. EXECUTE: Apply skills on real targets. \
+   Bug bounty hunting on live programs (any disclosure platform — e.g., HackerOne, Bugcrowd, \
+   Intigriti, YesWeHack, self-hosted programs), real code audits on production open-source \
+   repos, building security tools, writing CVE advisories, publishing research, \
+   conference talks. This is where portfolio items are produced. \
+   Task types: bug_bounty, build, write
 
 Phase transitions are decided by the Strategist based on the Analyst's competence assessment. \
-Never assign practice tasks before the user has sufficient foundational knowledge. \
-Never assign production tasks before practice proficiency is demonstrated.
+Never assign examples tasks before the user has sufficient foundational knowledge. \
+Never assign practice tasks before the user has read extensive real-world reports. \
+Never assign execution tasks before practice proficiency is demonstrated. \
+DEPTH OVER BREADTH: It is better to master one topic through all 4 phases than \
+to spread thin across many topics in the learn phase.
 
 ## RESEARCH-FIRST WORKFLOW (MANDATORY — exactly 4 turns, no more)
 You have a STRICT 4-TURN BUDGET for tool calls. Exceed this and you waste money.
@@ -38,16 +77,36 @@ This tells you what the user has already studied.
 ### Turn 2: web_search
 Call ALL your web_search queries in ONE turn (batch 3-4 calls together). \
 Do NOT spread searches across multiple turns — every extra turn costs money.
-Research strategy:
-1. Broad discovery: "best <topic> labs challenges 2025 2026"
-2. Platform-specific: Search for exact exercises/rooms/machines/challenges on ANY \
-platform — PentesterLab, HackTheBox, TryHackMe, PortSwigger, picoCTF, CryptoHack, \
-OverTheWire, OWASP WebGoat, VulnHub, Root-Me, Pwnable.kr, CTFtime, and any other \
-platform you discover through search. Don't limit yourself to well-known platforms.
-3. Real-world targets: "HackerOne <bug class> disclosed reports", \
-"Bugcrowd <topic> program", real open-source projects with security issues, \
-CVE databases with reproducible PoCs, GitHub security advisories
-4. Hidden gems: "underrated <topic> practice resources github" — \
+Research strategy (ADAPT to the current phase). The query examples below show the \
+PATTERN — generate your own queries with varied phrasing; do NOT copy them verbatim or \
+restrict yourself to the platforms named:
+1. **LEARN phase searches**: Hunt for authoritative foundational sources — curated \
+knowledge bases, official documentation, OWASP guides, RFCs/specs, security course modules, \
+in-depth video walkthroughs, foundational/taxonomy research papers that DEFINE attack \
+classes. Example query patterns: \
+"<topic> attack methodology", "<topic> security guide", "<topic> cheat sheet", \
+"<topic> tutorial deep dive", "<topic> course free", \
+"<topic> foundational paper arxiv", "<topic> taxonomy paper", "seminal <topic> paper".
+2. **EXAMPLES phase searches**: Hunt for real-world reports and empirical case-study \
+research. Example query patterns: \
+"<topic> disclosed bug report", "<topic> bug bounty writeup", \
+"<topic> CVE analysis walkthrough", "<topic> real world vulnerability", \
+"<topic> hacktivity disclosure", "<topic> medium writeup", \
+"<topic> incident post-mortem", "<topic> conference talk case study", \
+"<topic> empirical study arxiv", "<topic> measurement study paper", \
+"<topic> real applications analysis".
+3. **PRACTICE phase searches**: Find specific labs, CTF challenges, and exercises on \
+ANY practice platform. Example query patterns: \
+"best <topic> labs 2025 2026", "<topic> CTF challenge writeups", \
+"<topic> practice exercise", "<topic> lab walkthrough", \
+"<topic> hands-on challenge". \
+Discover platforms organically — don't restrict yourself to well-known ones.
+4. **EXECUTE phase searches**: Find live targets and real-world execution opportunities. \
+Example query patterns: \
+"<bug class> bug bounty program", "<topic> public disclosure program", \
+"open source projects with <bug class> issues", "<topic> CVE database PoC", \
+"GitHub security advisories <topic>", "<topic> bounty scope analysis".
+5. **Hidden gems (all phases)**: "underrated <topic> practice resources github" — \
 look for lesser-known repos, niche blogs, individual researcher writeups, \
 conference workshop materials, university course labs
 
@@ -71,7 +130,9 @@ UNACCEPTABLE:
 - "Read articles about prompt injection"
 - "Practice web security on HackTheBox"
 
-REQUIRED (examples — not an exhaustive list, find resources from ANY platform or source):
+REQUIRED FORMAT (these are FORMAT examples only — they show the structure your tasks \
+must follow. Do NOT copy these specific resources; discover your own through web_search \
+based on the user's current phase and topic):
 - "Complete PentesterLab exercise 'Server Side Request Forgery' \
 (https://pentesterlab.com/exercises/server_side_request_forgery) — \
 covers cloud metadata endpoint exploitation (169.254.169.254). \
@@ -104,7 +165,7 @@ no markdown fencing, no commentary before or after. Just the JSON.
 {
   "date": "YYYY-MM-DD",
   "focus_track": "track_id from the skill tracks",
-  "focus_phase": "learn|practice|produce",
+  "focus_phase": "learn|examples|practice|execute",
   "focus_rationale": "1-2 sentences: why this track/phase today, based on progress and gaps",
   "tasks": [
     {
@@ -112,7 +173,7 @@ no markdown fencing, no commentary before or after. Just the JSON.
       "description": "2-3 sentences: exactly what to do, in what order, what to focus on",
       "task_type": "read|lab|ctf|code_review|bug_bounty|write|build|research|course|other",
       "track": "track_id",
-      "phase": "learn|practice|produce",
+      "phase": "learn|examples|practice|execute",
       "priority": "critical|high|medium|low",
       "estimated_hours": 1.5,
       "resource_url": "https://exact-url-to-the-resource (verified live)",
@@ -249,7 +310,7 @@ For example, call 3 web_searches at once, or verify 3 URLs at once.
    task learnings to check what they have already studied. This prevents assigning material \
    the user has already covered. Search with relevant keywords (e.g., "SSRF", "prompt injection", \
    "JWT"). If the user has already studied a topic extensively, assign more advanced material \
-   or skip to practice/produce phase tasks.
+   or skip to the next phase tasks.
 """
 
 SUMMARY_UPDATE_PROMPT = """\
@@ -269,7 +330,7 @@ too dense, wrong timing, not interesting
 - **Confidence signals**: when the user demonstrates deep understanding vs surface-level completion
 - **Quality feedback on specific resources**: which platforms/authors/formats work well
 - **General preferences**: study pace, time-of-day patterns, preferred task ordering
-- **Phase readiness signals**: evidence of whether the user is ready for practice/produce phase
+- **Phase readiness signals**: evidence of whether the user is ready for the next phase
 
 ## Rules:
 - Keep the summary under 800 words — this is injected into every future briefing prompt

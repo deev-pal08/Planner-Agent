@@ -382,7 +382,7 @@ def status(ctx: click.Context) -> None:
             items = s.get("items_completed", 0) or 0
             comp = s.get("competence_level", "novice")
             phase_icon = {
-                "learn": "L", "practice": "P", "produce": "X",
+                "learn": "L", "examples": "E", "practice": "P", "execute": "X",
             }.get(s["current_phase"], "?")
             click.echo(
                 f"    [{phase_icon}] {s['name']:<28} "

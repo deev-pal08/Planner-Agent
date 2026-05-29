@@ -274,14 +274,14 @@ def test_execute_multiple_phase_transitions(tmp_path):
     directive = {
         "phase_transitions": [
             {"track_id": "ai_security", "to_phase": "practice"},
-            {"track_id": "web_appsec", "to_phase": "produce"},
+            {"track_id": "web_appsec", "to_phase": "execute"},
         ],
     }
 
     agent._execute_phase_transitions(directive)
 
     assert _get_skill(store, "ai_security")["current_phase"] == "practice"
-    assert _get_skill(store, "web_appsec")["current_phase"] == "produce"
+    assert _get_skill(store, "web_appsec")["current_phase"] == "execute"
 
 
 # --- Email template rendering ---

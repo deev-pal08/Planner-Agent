@@ -14,8 +14,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class Phase(StrEnum):
     LEARN = "learn"
+    EXAMPLES = "examples"
     PRACTICE = "practice"
-    PRODUCE = "produce"
+    EXECUTE = "execute"
 
 
 class TaskStatus(StrEnum):

@@ -100,7 +100,8 @@ uv run ruff check src/                  # lint
 - **Discovery layer**: Scout (Haiku) discovers time-sensitive opportunities via web search agent loop (CTFs, CFPs, bounty programs) every 3+ days, persisted to DB and surfaced to the Strategist.
 - **Cost tracking**: Per-brain token usage (input/output/calls) accumulated in the meta table. Visible in `planner status`.
 - **Goal-milestone-directive chain**: Goals → Milestones → StrategicDirective → Daily Tasks. Full traceability from career objectives to individual tasks.
-- **Phase transitions**: learn → practice → produce, executed by directive decision, applied after briefing generation.
+- **4-phase mastery loop**: learn → examples → practice → execute. Each phase has explicit mastery criteria and allowed task types.
+- **Phase transitions**: learn → examples → practice → execute, executed by directive decision, applied after briefing generation.
 - **Newsletter integration**: Reads Newsletter Agent's SQLite DB (read-only). Articles rendered as a reading block (5-10 articles per briefing) in the briefing email.
 - **Retry logic**: All API calls wrapped with tenacity (3 attempts, exponential backoff on APIStatusError)
 - **JSON retry fallback**: If any brain outputs text instead of pure JSON, a one-shot retry extracts valid JSON
@@ -155,7 +156,13 @@ The planner is designed for flexible, user-driven pacing — not daily cron:
 - **No forced cadence**: same-day dedup prevents accidental double-runs, but any multi-day gap is fine
 
 ## Learning Loop
-Every skill follows: Learn → Practice → Produce. Phase transitions are decided by the Strategist based on the Analyst's competence assessment and Critic's trajectory analysis — not arbitrary item counts.
+Every skill follows the 4-phase Mastery Loop: Learn → Examples → Practice → Execute. Each phase has a mastery gate — no phase is ever skipped.
+1. **Learn**: Drain ALL foundational knowledge — HackTricks, PortSwigger, courses, cheat sheets, official docs
+2. **Examples**: Read EXTENSIVE real-world reports — bug bounty writeups, CVEs, HackerOne Hacktivity, Medium articles, disclosed bugs
+3. **Practice**: Hands-on — CTFs, Labs (PentesterLab, HackTheBox, TryHackMe), code review exercises
+4. **Execute**: Real targets — bug bounty hunting, real code audits, tool building, CVE advisories, research papers
+
+Phase transitions are decided by the Strategist based on the Analyst's competence assessment and Critic's trajectory analysis — not arbitrary item counts. Depth over breadth.
 
 ## Task Specificity Rule
 The system prompt enforces hyper-specific tasks. Never "Complete 2 SSRF labs" — always exact lab titles, URLs, and rationale for why that specific resource. Resources discovered from ANY platform via web search, not limited to a fixed list.

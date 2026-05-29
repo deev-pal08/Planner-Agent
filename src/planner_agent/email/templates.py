@@ -6,8 +6,9 @@ from planner_agent.models import DailyBriefing, Phase
 
 PHASE_LABELS = {
     Phase.LEARN: ("LEARN", "#6366f1", "#eef2ff"),
+    Phase.EXAMPLES: ("EXAMPLES", "#8b5cf6", "#f5f3ff"),
     Phase.PRACTICE: ("PRACTICE", "#f59e0b", "#fffbeb"),
-    Phase.PRODUCE: ("PRODUCE", "#10b981", "#ecfdf5"),
+    Phase.EXECUTE: ("EXECUTE", "#10b981", "#ecfdf5"),
 }
 
 PRIORITY_STYLES = {

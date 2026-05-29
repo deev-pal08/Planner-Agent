@@ -66,7 +66,7 @@ Return a JSON object:
   "negative_patterns": ["Skipping labs when tired", "Avoiding content creation"],
   "strategic_recommendations": [
     "Reduce web_appsec allocation — user consistently under-delivers here",
-    "Add 1 produce-phase task per week to build portfolio"
+    "Add 1 execute-phase task per week to build portfolio"
   ],
   "risks": [
     {
