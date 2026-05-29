@@ -5,9 +5,11 @@ about_me: "AboutMe.md"
 
 # LLM settings
 llm:
-  model: "claude-haiku-4-5"           # Daily briefing generation (cheap, fast)
-  research_model: "claude-sonnet-4-6"  # Research tasks, skill assessment (smarter)
+  model: "claude-haiku-4-5"           # Feedback parsing, Analyst, Scout (cheap, fast)
+  research_model: "claude-sonnet-4-6"  # Tactician, Critic (smarter)
+  strategic_model: "claude-opus-4-8"     # Strategist (weekly, highest quality)
   max_tokens: 16384
+  strategic_max_tokens: 8192
 
 # Email — outbound daily briefing
 email:
@@ -38,12 +40,44 @@ time_budget:
 newsletter:
   project_dir: ""   # path to newsletter-agent project (for CLI invocation)
   enabled: false     # set to true once newsletter-agent is configured
+  stale_threshold_days: 7
 
-# Skill tracks and their target phases by month 6
+# Web search — multi-source for deep resource research
+search:
+  enabled: true
+  max_results: 5
+  brave:
+    enabled: true
+    api_key_env: "BRAVE_API_KEY"
+  tavily:
+    enabled: true
+    api_key_env: "TAVILY_API_KEY"
+  exa:
+    enabled: true
+    api_key_env: "EXA_API_KEY"
+
+# Multi-brain orchestration
+# All brains auto-trigger via `planner daily` — no separate commands needed
+brains:
+  strategist:
+    enabled: true
+    # model_override: "claude-opus-4-8"  # defaults to llm.strategic_model
+  critic:
+    enabled: true
+    # model_override: "claude-sonnet-4-6"  # defaults to llm.research_model
+  analyst:
+    enabled: true
+    # model_override: "claude-haiku-4-5"  # defaults to llm.model
+  scout:
+    enabled: true
+    auto_trigger: true  # set false to disable periodic opportunity discovery
+
+# Skill tracks — all start at "learn" phase
+# Phase progression: learn → practice → produce (decided by Strategist)
 tracks:
   web_appsec:
     name: "Web Application Security"
-    current_phase: "practice"    # learn → practice → produce
+    current_phase: "learn"
     priority: "high"
   ai_security:
     name: "AI/ML Security"
@@ -55,7 +89,7 @@ tracks:
     priority: "high"
   bug_bounty:
     name: "Bug Bounty Hunting"
-    current_phase: "practice"
+    current_phase: "learn"
     priority: "high"
   content_creation:
     name: "Content & Research Publishing"
@@ -63,5 +97,5 @@ tracks:
     priority: "medium"
   code_review:
     name: "Advanced Code Review"
-    current_phase: "practice"
+    current_phase: "learn"
     priority: "medium"
