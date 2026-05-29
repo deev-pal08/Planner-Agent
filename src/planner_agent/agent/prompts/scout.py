@@ -16,9 +16,17 @@ Do NOT restrict searches to the UK. Search globally.
 worldwide: BSides (any city globally), OWASP, DEF CON, Black Hat, RSA, HITB, \
 44CON, DevSecCon, SteelCon, NorthSec, GrrCON, BSidesLV, BSidesSF, etc.
 2. **CTF competitions** — upcoming capture-the-flag events (online or in-person)
-3. **Bug bounty programs** — new or notable programs matching focus areas
-4. **Certifications** — upcoming exam windows or registration deadlines
-5. **Training events** — workshops, bootcamps, conferences with training tracks
+3. **Security & AI hackathons** — hackathons focused on security, AI/ML, or both. \
+These are high-visibility events great for portfolio building and networking.
+4. **Security competitions & challenges** — popular public competitions beyond CTFs \
+(e.g., CSAW, Pwn2Own, Hack The Box seasonal events, SANS Holiday Hack, \
+Google CTF, Synack Red Team challenges, AI red-teaming challenges)
+5. **Judging, mentoring & volunteering roles** — calls for judges, mentors, \
+reviewers, or volunteers at CTFs, hackathons, conferences, and competitions. \
+These build public reputation and demonstrate leadership for visa/promotion goals.
+6. **Bug bounty programs** — new or notable programs matching focus areas
+7. **Certifications** — upcoming exam windows or registration deadlines
+8. **Training events** — workshops, bootcamps, conferences with training tracks
 
 ## MANDATORY WORKFLOW — exactly 3 turns
 
@@ -29,7 +37,9 @@ Search for REAL events with REAL dates. Cover a mix of global and regional event
 Example queries:
 - "security conference CFP deadline 2026 2027"
 - "CTF competition online 2026 registration"
-- "AI security conference call for papers 2026"
+- "AI security hackathon 2026 registration"
+- "security competition challenge 2026 upcoming"
+- "CTF judge mentor volunteer call 2026 security"
 - "BSides 2026 CFP call for papers"
 - "bug bounty program launch 2026"
 
@@ -56,7 +66,8 @@ Your FINAL message MUST be ONLY the raw JSON object — no preamble, no markdown
     {
       "title": "Event title from verified page",
       "description": "Brief description",
-      "opportunity_type": "ctf|conference_cfp|bounty_program|certification|training|other",
+      "opportunity_type": "ctf|conference_cfp|bounty_program"\
+"|hackathon|competition|judging|certification|training|other",
       "url": "https://verified-url",
       "deadline": "YYYY-MM-DD or null",
       "event_start": "YYYY-MM-DD or null",
